@@ -6,13 +6,15 @@ import { loadCostUsageSummary } from "../../infra/session-cost-usage.js";
 
 const COST_USAGE_CACHE_TTL_MS = 30_000;
 
+type CostUsageCacheKey = `${number}:${string}`;
+
 type CostUsageCacheEntry = {
   summary?: CostUsageSummary;
   updatedAt?: number;
   inFlight?: Promise<CostUsageSummary>;
 };
 
-const costUsageCache = new Map<number, CostUsageCacheEntry>();
+const costUsageCache = new Map<CostUsageCacheKey, CostUsageCacheEntry>();
 
 const parseDays = (raw: unknown): number => {
   if (typeof raw === "number" && Number.isFinite(raw)) {
@@ -27,13 +29,33 @@ const parseDays = (raw: unknown): number => {
   return 30;
 };
 
+const parseType = (raw: unknown): "daily" | "monthly" | "yearly" | "conversation" => {
+  if (typeof raw !== "string") {
+    return "daily";
+  }
+  const normalized = raw.toLowerCase().trim();
+  if (normalized === "monthly" || normalized === "month") {
+    return "monthly";
+  }
+  if (normalized === "yearly" || normalized === "year") {
+    return "yearly";
+  }
+  if (normalized === "conversation" || normalized === "conv") {
+    return "conversation";
+  }
+  return "daily";
+};
+
 async function loadCostUsageSummaryCached(params: {
   days: number;
+  type?: "daily" | "monthly" | "yearly" | "conversation";
   config: ReturnType<typeof loadConfig>;
 }): Promise<CostUsageSummary> {
   const days = Math.max(1, params.days);
+  const type = params.type ?? "daily";
+  const cacheKey: CostUsageCacheKey = `${days}:${type}`;
   const now = Date.now();
-  const cached = costUsageCache.get(days);
+  const cached = costUsageCache.get(cacheKey);
   if (cached?.summary && cached.updatedAt && now - cached.updatedAt < COST_USAGE_CACHE_TTL_MS) {
     return cached.summary;
   }
@@ -46,9 +68,9 @@ async function loadCostUsageSummaryCached(params: {
   }
 
   const entry: CostUsageCacheEntry = cached ?? {};
-  const inFlight = loadCostUsageSummary({ days, config: params.config })
+  const inFlight = loadCostUsageSummary({ days, type, config: params.config })
     .then((summary) => {
-      costUsageCache.set(days, { summary, updatedAt: Date.now() });
+      costUsageCache.set(cacheKey, { summary, updatedAt: Date.now() });
       return summary;
     })
     .catch((err) => {
@@ -58,15 +80,15 @@ async function loadCostUsageSummaryCached(params: {
       throw err;
     })
     .finally(() => {
-      const current = costUsageCache.get(days);
+      const current = costUsageCache.get(cacheKey);
       if (current?.inFlight === inFlight) {
         current.inFlight = undefined;
-        costUsageCache.set(days, current);
+        costUsageCache.set(cacheKey, current);
       }
     });
 
   entry.inFlight = inFlight;
-  costUsageCache.set(days, entry);
+  costUsageCache.set(cacheKey, entry);
 
   if (entry.summary) {
     return entry.summary;
@@ -82,7 +104,8 @@ export const usageHandlers: GatewayRequestHandlers = {
   "usage.cost": async ({ respond, params }) => {
     const config = loadConfig();
     const days = parseDays(params?.days);
-    const summary = await loadCostUsageSummaryCached({ days, config });
+    const type = parseType(params?.type);
+    const summary = await loadCostUsageSummaryCached({ days, config, type });
     respond(true, summary, undefined);
   },
 };
