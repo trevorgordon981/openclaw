@@ -161,48 +161,23 @@ export const handleUsageCommand: CommandHandler = async (params, allowTextComman
 
   const rawArgs = normalized === "/usage" ? "" : normalized.slice("/usage".length).trim();
   const requested = rawArgs ? normalizeUsageDisplay(rawArgs) : undefined;
-  if (rawArgs.toLowerCase().startsWith("cost")) {
-    const sessionSummary = await loadSessionCostSummary({
-      sessionId: params.sessionEntry?.sessionId,
-      sessionEntry: params.sessionEntry,
-      sessionFile: params.sessionEntry?.sessionFile,
-      config: params.cfg,
-    });
-    const summary = await loadCostUsageSummary({ days: 30, config: params.cfg });
 
-    const sessionCost = formatUsd(sessionSummary?.totalCost);
-    const sessionTokens = sessionSummary?.totalTokens
-      ? formatTokenCount(sessionSummary.totalTokens)
-      : undefined;
-    const sessionMissing = sessionSummary?.missingCostEntries ?? 0;
-    const sessionSuffix = sessionMissing > 0 ? " (partial)" : "";
-    const sessionLine =
-      sessionCost || sessionTokens
-        ? `Session ${sessionCost ?? "n/a"}${sessionSuffix}${sessionTokens ? ` · ${sessionTokens} tokens` : ""}`
-        : "Session n/a";
-
-    const todayKey = new Date().toLocaleDateString("en-CA");
-    const todayEntry = summary.daily.find((entry) => entry.date === todayKey);
-    const todayCost = formatUsd(todayEntry?.totalCost);
-    const todayMissing = todayEntry?.missingCostEntries ?? 0;
-    const todaySuffix = todayMissing > 0 ? " (partial)" : "";
-    const todayLine = `Today ${todayCost ?? "n/a"}${todaySuffix}`;
-
-    const last30Cost = formatUsd(summary.totals.totalCost);
-    const last30Missing = summary.totals.missingCostEntries;
-    const last30Suffix = last30Missing > 0 ? " (partial)" : "";
-    const last30Line = `Last 30d ${last30Cost ?? "n/a"}${last30Suffix}`;
-
-    return {
-      shouldContinue: false,
-      reply: { text: `💸 Usage cost\n${sessionLine}\n${todayLine}\n${last30Line}` },
-    };
+  const argsLower = rawArgs.toLowerCase();
+  if (
+    argsLower.startsWith("cost") ||
+    argsLower.startsWith("daily") ||
+    argsLower.startsWith("monthly") ||
+    argsLower.startsWith("yearly") ||
+    argsLower.startsWith("conversation") ||
+    argsLower.startsWith("conv")
+  ) {
+    return handleCostCommand(params, argsLower);
   }
 
   if (rawArgs && !requested) {
     return {
       shouldContinue: false,
-      reply: { text: "⚙️ Usage: /usage off|tokens|full|cost" },
+      reply: { text: "⚙️ Usage: /usage off|tokens|full|cost [daily|monthly|yearly|conversation]" },
     };
   }
 
@@ -234,6 +209,125 @@ export const handleUsageCommand: CommandHandler = async (params, allowTextComman
     },
   };
 };
+
+async function handleCostCommand(
+  params: Parameters<CommandHandler>[0],
+  argsLower: string,
+): Promise<ReturnType<CommandHandler>> {
+  let type: "daily" | "monthly" | "yearly" | "conversation" = "daily";
+
+  if (argsLower.startsWith("monthly") || argsLower.startsWith("month")) {
+    type = "monthly";
+  } else if (argsLower.startsWith("yearly") || argsLower.startsWith("year")) {
+    type = "yearly";
+  } else if (argsLower.startsWith("conversation") || argsLower.startsWith("conv")) {
+    type = "conversation";
+  }
+
+  const sessionSummary = await loadSessionCostSummary({
+    sessionId: params.sessionEntry?.sessionId,
+    sessionEntry: params.sessionEntry,
+    sessionFile: params.sessionEntry?.sessionFile,
+    config: params.cfg,
+  });
+
+  const summary = await loadCostUsageSummary({ days: 365, type, config: params.cfg });
+
+  const sessionCost = formatUsd(sessionSummary?.totalCost);
+  const sessionTokens = sessionSummary?.totalTokens
+    ? formatTokenCount(sessionSummary.totalTokens)
+    : undefined;
+  const sessionMissing = sessionSummary?.missingCostEntries ?? 0;
+  const sessionSuffix = sessionMissing > 0 ? " (partial)" : "";
+  const sessionLine =
+    sessionCost || sessionTokens
+      ? `Session ${sessionCost ?? "n/a"}${sessionSuffix}${sessionTokens ? ` · ${sessionTokens} tokens` : ""}`
+      : "Session n/a";
+
+  let breakdown = "";
+  if (type === "daily") {
+    breakdown = formatDailyBreakdown(summary);
+  } else if (type === "monthly") {
+    breakdown = formatMonthlyBreakdown(summary);
+  } else if (type === "yearly") {
+    breakdown = formatYearlyBreakdown(summary);
+  } else if (type === "conversation") {
+    breakdown = formatConversationBreakdown(summary);
+  }
+
+  const totalCost = formatUsd(summary.totals.totalCost);
+  const totalTokens = formatTokenCount(summary.totals.totalTokens);
+  const totalMissing = summary.totals.missingCostEntries;
+  const totalSuffix = totalMissing > 0 ? " (partial)" : "";
+  const totalLine = `Total ${totalCost ?? "n/a"}${totalSuffix} · ${totalTokens} tokens`;
+
+  const lines = ["💸 Usage cost", sessionLine, "", ...breakdown.split("\n"), "", totalLine];
+
+  return {
+    shouldContinue: false,
+    reply: { text: lines.join("\n") },
+  };
+}
+
+function formatDailyBreakdown(summary: ReturnType<typeof loadCostUsageSummary>): string {
+  if (!summary.daily || summary.daily.length === 0) {
+    return "No data available";
+  }
+
+  const lines = summary.daily.slice(-10).map((entry) => {
+    const cost = formatUsd(entry.totalCost);
+    const tokens = formatTokenCount(entry.totalTokens);
+    const suffix = entry.missingCostEntries > 0 ? " (partial)" : "";
+    return `${entry.date}: ${cost}${suffix} · ${tokens}`;
+  });
+
+  return lines.join("\n");
+}
+
+function formatMonthlyBreakdown(summary: ReturnType<typeof loadCostUsageSummary>): string {
+  if (!summary.monthly || summary.monthly.length === 0) {
+    return "No data available";
+  }
+
+  const lines = summary.monthly.map((entry) => {
+    const cost = formatUsd(entry.totalCost);
+    const tokens = formatTokenCount(entry.totalTokens);
+    const suffix = entry.missingCostEntries > 0 ? " (partial)" : "";
+    return `${entry.month}: ${cost}${suffix} · ${tokens}`;
+  });
+
+  return lines.join("\n");
+}
+
+function formatYearlyBreakdown(summary: ReturnType<typeof loadCostUsageSummary>): string {
+  if (!summary.yearly || summary.yearly.length === 0) {
+    return "No data available";
+  }
+
+  const lines = summary.yearly.map((entry) => {
+    const cost = formatUsd(entry.totalCost);
+    const tokens = formatTokenCount(entry.totalTokens);
+    const suffix = entry.missingCostEntries > 0 ? " (partial)" : "";
+    return `${entry.year}: ${cost}${suffix} · ${tokens}`;
+  });
+
+  return lines.join("\n");
+}
+
+function formatConversationBreakdown(summary: ReturnType<typeof loadCostUsageSummary>): string {
+  if (!summary.conversation || summary.conversation.length === 0) {
+    return "No data available";
+  }
+
+  const lines = summary.conversation.slice(-20).map((entry) => {
+    const cost = formatUsd(entry.totalCost);
+    const tokens = formatTokenCount(entry.totalTokens);
+    const date = new Date(entry.timestamp).toLocaleString();
+    return `Message ${entry.messageIndex}: ${cost} · ${tokens} @ ${date}`;
+  });
+
+  return lines.join("\n");
+}
 
 export const handleRestartCommand: CommandHandler = async (params, allowTextCommands) => {
   if (!allowTextCommands) {
