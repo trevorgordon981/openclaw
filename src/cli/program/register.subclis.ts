@@ -33,6 +33,14 @@ const loadConfig = async (): Promise<OpenClawConfig> => {
 
 const entries: SubCliEntry[] = [
   {
+    name: "quickstart",
+    description: "Guided setup wizard for common deployment scenarios",
+    register: async (program) => {
+      const mod = await import("../quickstart-cli.js");
+      mod.registerQuickstartCli(program);
+    },
+  },
+  {
     name: "acp",
     description: "Agent Control Protocol tools",
     register: async (program) => {

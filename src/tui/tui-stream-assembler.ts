@@ -52,6 +52,11 @@ export class TuiStreamAssembler {
     const previousDisplayText = state.displayText;
     this.updateRunState(state, message, showThinking);
 
+    // Debug: log when we can't extract content
+    if (process.env.OPENCLAW_TUI_DEBUG && !state.contentText && !state.thinkingText) {
+      console.error(`[tui-debug] No content extracted from delta message:`, JSON.stringify(message).slice(0, 200));
+    }
+
     if (!state.displayText || state.displayText === previousDisplayText) {
       return null;
     }

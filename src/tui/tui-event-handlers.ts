@@ -70,7 +70,12 @@ export function createEventHandlers(context: EventHandlerContext) {
     }
     const evt = payload as ChatEvent;
     syncSessionKey();
+    
+    // Debug: log mismatched session keys (helps diagnose "no response" issues)
     if (evt.sessionKey !== state.currentSessionKey) {
+      if (process.env.OPENCLAW_TUI_DEBUG) {
+        console.error(`[tui-debug] Session key mismatch: expected="${state.currentSessionKey}" got="${evt.sessionKey}"`);
+      }
       return;
     }
     if (finalizedRuns.has(evt.runId)) {
