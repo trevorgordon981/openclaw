@@ -17,6 +17,7 @@ type ParsedUsageEntry = {
   provider?: string;
   model?: string;
   timestamp?: Date;
+  messageIndex?: number;
 };
 
 export type CostUsageTotals = {
@@ -33,10 +34,26 @@ export type CostUsageDailyEntry = CostUsageTotals & {
   date: string;
 };
 
+export type CostUsageMonthlyEntry = CostUsageTotals & {
+  month: string; // YYYY-MM format
+};
+
+export type CostUsageYearlyEntry = CostUsageTotals & {
+  year: string; // YYYY format
+};
+
+export type ConversationCostEntry = CostUsageTotals & {
+  messageIndex: number;
+  timestamp: number;
+};
+
 export type CostUsageSummary = {
   updatedAt: number;
-  days: number;
-  daily: CostUsageDailyEntry[];
+  days?: number;
+  daily?: CostUsageDailyEntry[];
+  monthly?: CostUsageMonthlyEntry[];
+  yearly?: CostUsageYearlyEntry[];
+  conversation?: ConversationCostEntry[];
   totals: CostUsageTotals;
 };
 
@@ -134,6 +151,22 @@ const parseUsageEntry = (entry: Record<string, unknown>): ParsedUsageEntry | nul
 const formatDayKey = (date: Date): string =>
   date.toLocaleDateString("en-CA", { timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone });
 
+const formatMonthKey = (date: Date): string => {
+  const yearMonth = date.toLocaleDateString("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+  });
+  // Returns YYYY-MM-DD, we want just YYYY-MM
+  return yearMonth.slice(0, 7);
+};
+
+const formatYearKey = (date: Date): string =>
+  date.toLocaleDateString("en-CA", {
+    year: "numeric",
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+  });
+
 const applyUsageTotals = (totals: CostUsageTotals, usage: NormalizedUsage) => {
   totals.input += usage.input ?? 0;
   totals.output += usage.output ?? 0;
@@ -161,6 +194,7 @@ async function scanUsageFile(params: {
   const fileStream = fs.createReadStream(params.filePath, { encoding: "utf-8" });
   const rl = readline.createInterface({ input: fileStream, crlfDelay: Infinity });
 
+  let messageIndex = 0;
   for await (const line of rl) {
     const trimmed = line.trim();
     if (!trimmed) {
@@ -182,6 +216,7 @@ async function scanUsageFile(params: {
         entry.costTotal = estimateUsageCost({ usage: entry.usage, cost });
       }
 
+      entry.messageIndex = messageIndex++;
       params.onEntry(entry);
     } catch {
       // Ignore malformed lines
@@ -189,19 +224,33 @@ async function scanUsageFile(params: {
   }
 }
 
+type CostAggregationType = "daily" | "monthly" | "yearly" | "conversation";
+
 export async function loadCostUsageSummary(params?: {
   days?: number;
+  type?: CostAggregationType;
   config?: OpenClawConfig;
   agentId?: string;
+  sessionId?: string;
+  sessionFile?: string;
 }): Promise<CostUsageSummary> {
+  const type = params?.type ?? "daily";
   const days = Math.max(1, Math.floor(params?.days ?? 30));
   const now = new Date();
   const since = new Date(now);
   since.setDate(since.getDate() - (days - 1));
   const sinceTime = since.getTime();
 
-  const dailyMap = new Map<string, CostUsageTotals>();
   const totals = emptyTotals();
+
+  // For conversation aggregation, use specific session file
+  if (type === "conversation" && (params?.sessionId || params?.sessionFile)) {
+    return loadConversationCostSummary({
+      sessionId: params.sessionId,
+      sessionFile: params.sessionFile,
+      config: params.config,
+    });
+  }
 
   const sessionsDir = resolveSessionTranscriptsDirForAgent(params?.agentId);
   const entries = await fs.promises.readdir(sessionsDir, { withFileTypes: true }).catch(() => []);
@@ -223,35 +272,159 @@ export async function loadCostUsageSummary(params?: {
     )
   ).filter((filePath): filePath is string => Boolean(filePath));
 
-  for (const filePath of files) {
-    await scanUsageFile({
-      filePath,
-      config: params?.config,
-      onEntry: (entry) => {
-        const ts = entry.timestamp?.getTime();
-        if (!ts || ts < sinceTime) {
-          return;
-        }
-        const dayKey = formatDayKey(entry.timestamp ?? now);
-        const bucket = dailyMap.get(dayKey) ?? emptyTotals();
-        applyUsageTotals(bucket, entry.usage);
-        applyCostTotal(bucket, entry.costTotal);
-        dailyMap.set(dayKey, bucket);
+  if (type === "daily") {
+    const dailyMap = new Map<string, CostUsageTotals>();
 
-        applyUsageTotals(totals, entry.usage);
-        applyCostTotal(totals, entry.costTotal);
-      },
-    });
+    for (const filePath of files) {
+      await scanUsageFile({
+        filePath,
+        config: params?.config,
+        onEntry: (entry) => {
+          const ts = entry.timestamp?.getTime();
+          if (!ts || ts < sinceTime) {
+            return;
+          }
+          const dayKey = formatDayKey(entry.timestamp ?? now);
+          const bucket = dailyMap.get(dayKey) ?? emptyTotals();
+          applyUsageTotals(bucket, entry.usage);
+          applyCostTotal(bucket, entry.costTotal);
+          dailyMap.set(dayKey, bucket);
+
+          applyUsageTotals(totals, entry.usage);
+          applyCostTotal(totals, entry.costTotal);
+        },
+      });
+    }
+
+    const daily = Array.from(dailyMap.entries())
+      .map(([date, bucket]) => Object.assign({ date }, bucket))
+      .toSorted((a, b) => a.date.localeCompare(b.date));
+
+    return {
+      updatedAt: Date.now(),
+      days,
+      daily,
+      totals,
+    };
   }
 
-  const daily = Array.from(dailyMap.entries())
-    .map(([date, bucket]) => Object.assign({ date }, bucket))
-    .toSorted((a, b) => a.date.localeCompare(b.date));
+  if (type === "monthly") {
+    const monthlyMap = new Map<string, CostUsageTotals>();
+
+    for (const filePath of files) {
+      await scanUsageFile({
+        filePath,
+        config: params?.config,
+        onEntry: (entry) => {
+          const ts = entry.timestamp?.getTime();
+          if (!ts || ts < sinceTime) {
+            return;
+          }
+          const monthKey = formatMonthKey(entry.timestamp ?? now);
+          const bucket = monthlyMap.get(monthKey) ?? emptyTotals();
+          applyUsageTotals(bucket, entry.usage);
+          applyCostTotal(bucket, entry.costTotal);
+          monthlyMap.set(monthKey, bucket);
+
+          applyUsageTotals(totals, entry.usage);
+          applyCostTotal(totals, entry.costTotal);
+        },
+      });
+    }
+
+    const monthly = Array.from(monthlyMap.entries())
+      .map(([month, bucket]) => Object.assign({ month }, bucket))
+      .toSorted((a, b) => a.month.localeCompare(b.month));
+
+    return {
+      updatedAt: Date.now(),
+      days,
+      monthly,
+      totals,
+    };
+  }
+
+  if (type === "yearly") {
+    const yearlyMap = new Map<string, CostUsageTotals>();
+
+    for (const filePath of files) {
+      await scanUsageFile({
+        filePath,
+        config: params?.config,
+        onEntry: (entry) => {
+          const ts = entry.timestamp?.getTime();
+          if (!ts || ts < sinceTime) {
+            return;
+          }
+          const yearKey = formatYearKey(entry.timestamp ?? now);
+          const bucket = yearlyMap.get(yearKey) ?? emptyTotals();
+          applyUsageTotals(bucket, entry.usage);
+          applyCostTotal(bucket, entry.costTotal);
+          yearlyMap.set(yearKey, bucket);
+
+          applyUsageTotals(totals, entry.usage);
+          applyCostTotal(totals, entry.costTotal);
+        },
+      });
+    }
+
+    const yearly = Array.from(yearlyMap.entries())
+      .map(([year, bucket]) => Object.assign({ year }, bucket))
+      .toSorted((a, b) => a.year.localeCompare(b.year));
+
+    return {
+      updatedAt: Date.now(),
+      days,
+      yearly,
+      totals,
+    };
+  }
 
   return {
     updatedAt: Date.now(),
     days,
-    daily,
+    totals,
+  };
+}
+
+export async function loadConversationCostSummary(params: {
+  sessionId?: string;
+  sessionFile?: string;
+  config?: OpenClawConfig;
+}): Promise<CostUsageSummary> {
+  const sessionFile =
+    params.sessionFile ??
+    (params.sessionId ? resolveSessionFilePath(params.sessionId, undefined) : undefined);
+
+  const totals = emptyTotals();
+  const conversation: ConversationCostEntry[] = [];
+
+  if (sessionFile && fs.existsSync(sessionFile)) {
+    await scanUsageFile({
+      filePath: sessionFile,
+      config: params.config,
+      onEntry: (entry) => {
+        applyUsageTotals(totals, entry.usage);
+        applyCostTotal(totals, entry.costTotal);
+
+        if (entry.timestamp && entry.messageIndex !== undefined) {
+          const ts = entry.timestamp.getTime();
+          const conversationEntry: ConversationCostEntry = {
+            ...emptyTotals(),
+            messageIndex: entry.messageIndex,
+            timestamp: ts,
+          };
+          applyUsageTotals(conversationEntry, entry.usage);
+          applyCostTotal(conversationEntry, entry.costTotal);
+          conversation.push(conversationEntry);
+        }
+      },
+    });
+  }
+
+  return {
+    updatedAt: Date.now(),
+    conversation,
     totals,
   };
 }
