@@ -1,7 +1,7 @@
 // Defaults for agent metadata when upstream does not supply them.
-// Model id uses pi-ai's built-in Google catalog.
-// Switched to Gemini 2.0 Flash for cost efficiency ($0.075/$0.30 input/output).
-export const DEFAULT_PROVIDER = "google";
-export const DEFAULT_MODEL = "gemini-2.0-flash";
-// Context window: Gemini 2.0 Flash supports 1M tokens (per Google's documentation).
-export const DEFAULT_CONTEXT_TOKENS = 1_000_000;
+// Model id uses pi-ai's built-in Anthropic catalog.
+// Using Claude Sonnet for balance of capability and cost ($3/$15 input/output per 1M tokens).
+export const DEFAULT_PROVIDER = "anthropic";
+export const DEFAULT_MODEL = "claude-sonnet-4-5";
+// Context window: Claude Sonnet 4.5 supports 200K tokens.
+export const DEFAULT_CONTEXT_TOKENS = 200_000;
