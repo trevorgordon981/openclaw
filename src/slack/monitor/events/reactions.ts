@@ -12,11 +12,18 @@ export function registerSlackReactionEvents(params: { ctx: SlackMonitorContext }
     try {
       const item = event.item;
       if (!item || item.type !== "message") {
+        return; // Early exit for non-message reactions
+      }
+
+      // Validate required item properties
+      if (!item.channel || !item.ts) {
+        ctx.runtime.error?.("Reaction event missing channel or ts");
         return;
       }
 
-      const channelInfo = item.channel ? await ctx.resolveChannelName(item.channel) : {};
+      const channelInfo = await ctx.resolveChannelName(item.channel);
       const channelType = channelInfo?.type;
+
       if (
         !ctx.isChannelAllowed({
           channelId: item.channel,
@@ -31,13 +38,24 @@ export function registerSlackReactionEvents(params: { ctx: SlackMonitorContext }
         channelId: item.channel,
         channelName: channelInfo?.name,
       });
+
+      // Validate reaction emoji exists
+      const emojiLabel = event.reaction?.trim();
+      if (!emojiLabel) {
+        ctx.runtime.error?.("Reaction event missing emoji");
+        return;
+      }
+
       const actorInfo = event.user ? await ctx.resolveUserName(event.user) : undefined;
-      const actorLabel = actorInfo?.name ?? event.user;
-      const emojiLabel = event.reaction ?? "emoji";
+      const actorLabel = actorInfo?.name ?? event.user ?? "unknown";
+
+      // Optional: author of original message
       const authorInfo = event.item_user ? await ctx.resolveUserName(event.item_user) : undefined;
-      const authorLabel = authorInfo?.name ?? event.item_user;
+      const authorLabel = authorInfo?.name ?? event.item_user ?? undefined;
+
       const baseText = `Slack reaction ${action}: :${emojiLabel}: by ${actorLabel} in ${channelLabel} msg ${item.ts}`;
       const text = authorLabel ? `${baseText} from ${authorLabel}` : baseText;
+
       const sessionKey = ctx.resolveSlackSystemEventSessionKey({
         channelId: item.channel,
         channelType,

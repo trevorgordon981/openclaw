@@ -56,43 +56,30 @@ async function loadCostUsageSummaryCached(params: {
   const cacheKey: CostUsageCacheKey = `${days}:${type}`;
   const now = Date.now();
   const cached = costUsageCache.get(cacheKey);
+
+  // Check if valid cached result exists
   if (cached?.summary && cached.updatedAt && now - cached.updatedAt < COST_USAGE_CACHE_TTL_MS) {
     return cached.summary;
   }
 
+  // Reuse in-flight promise if available
   if (cached?.inFlight) {
-    if (cached.summary) {
-      return cached.summary;
-    }
     return await cached.inFlight;
   }
 
-  const entry: CostUsageCacheEntry = cached ?? {};
+  // Start new load and cache it BEFORE the async operation
   const inFlight = loadCostUsageSummary({ days, type, config: params.config })
     .then((summary) => {
-      costUsageCache.set(cacheKey, { summary, updatedAt: Date.now() });
+      costUsageCache.set(cacheKey, { summary, updatedAt: Date.now(), inFlight: undefined });
       return summary;
     })
     .catch((err) => {
-      if (entry.summary) {
-        return entry.summary;
-      }
+      if (cached?.summary) return cached.summary;
       throw err;
-    })
-    .finally(() => {
-      const current = costUsageCache.get(cacheKey);
-      if (current?.inFlight === inFlight) {
-        current.inFlight = undefined;
-        costUsageCache.set(cacheKey, current);
-      }
     });
 
-  entry.inFlight = inFlight;
-  costUsageCache.set(cacheKey, entry);
-
-  if (entry.summary) {
-    return entry.summary;
-  }
+  // Set inFlight BEFORE awaiting to prevent race
+  costUsageCache.set(cacheKey, { ...cached, inFlight });
   return await inFlight;
 }
 

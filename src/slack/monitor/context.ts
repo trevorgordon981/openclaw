@@ -169,7 +169,10 @@ export function createSlackMonitorContext(params: {
     }
   >();
   const userCache = new Map<string, { name?: string }>();
-  const seenMessages = createDedupeCache({ ttlMs: 60_000, maxSize: 500 });
+
+  // Message deduplication with grace period to handle high-volume channels
+  const messageSeenTimestamps = new Map<string, number>();
+  const DEDUP_GRACE_PERIOD_MS = 500; // Messages within 500ms are considered the same
 
   const allowFrom = normalizeAllowList(params.allowFrom);
   const groupDmChannels = normalizeAllowList(params.groupDmChannels);
@@ -179,7 +182,26 @@ export function createSlackMonitorContext(params: {
     if (!channelId || !ts) {
       return false;
     }
-    return seenMessages.check(`${channelId}:${ts}`);
+
+    const key = `${channelId}:${ts}`;
+    const now = Date.now();
+    const lastSeen = messageSeenTimestamps.get(key);
+
+    if (lastSeen && now - lastSeen < DEDUP_GRACE_PERIOD_MS) {
+      return true; // Duplicate within grace period
+    }
+
+    messageSeenTimestamps.set(key, now);
+
+    // Clean up old entries (prevent memory leak)
+    if (messageSeenTimestamps.size > 10000) {
+      const cutoff = now - DEDUP_GRACE_PERIOD_MS;
+      for (const [k, v] of messageSeenTimestamps.entries()) {
+        if (v < cutoff) messageSeenTimestamps.delete(k);
+      }
+    }
+
+    return false; // First time seeing this
   };
 
   const resolveSlackSystemEventSessionKey = (p: {
