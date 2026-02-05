@@ -17,12 +17,14 @@ import {
   loadProviderUsageSummary,
   resolveUsageProviderId,
 } from "../../infra/provider-usage.js";
+import { loadSessionCostSummary } from "../../infra/session-cost-usage.js";
 import {
   buildAgentMainSessionKey,
   DEFAULT_AGENT_ID,
   resolveAgentIdFromSessionKey,
 } from "../../routing/session-key.js";
 import { applyModelOverrideToSessionEntry } from "../../sessions/model-overrides.js";
+import { formatUsd } from "../../utils/usage-format.js";
 import { resolveAgentDir } from "../agent-scope.js";
 import {
   ensureAuthProfileStore,
@@ -374,6 +376,7 @@ export function createSessionStatusTool(opts?: {
       const providerForCard = resolved.entry.providerOverride?.trim() || configured.provider;
       const usageProvider = resolveUsageProviderId(providerForCard);
       let usageLine: string | undefined;
+      let costLine: string | undefined;
       if (usageProvider) {
         try {
           const usageSummary = await loadProviderUsageSummary({
@@ -395,6 +398,25 @@ export function createSessionStatusTool(opts?: {
         } catch {
           // ignore
         }
+      }
+
+      // Load session-level cost summary
+      try {
+        const sessionId = resolved.entry.sessionId;
+        const sessionCostSummary = await loadSessionCostSummary({
+          sessionId,
+          sessionEntry: resolved.entry,
+          config: cfg,
+        });
+        if (sessionCostSummary && sessionCostSummary.totalCost > 0) {
+          const cost = sessionCostSummary.totalCost;
+          const costFormatted = formatUsd(cost);
+          if (costFormatted) {
+            costLine = `💵 Cost: ${costFormatted}`;
+          }
+        }
+      } catch {
+        // ignore cost loading errors
       }
 
       const isGroup =
@@ -446,6 +468,7 @@ export function createSessionStatusTool(opts?: {
           agentDir,
         }),
         usageLine,
+        costLine,
         timeLine,
         queue: {
           mode: queueSettings.mode,

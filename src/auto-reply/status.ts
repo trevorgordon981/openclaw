@@ -65,6 +65,7 @@ type StatusArgs = {
   resolvedElevated?: ElevatedLevel;
   modelAuth?: string;
   usageLine?: string;
+  costLine?: string;
   timeLine?: string;
   queue?: QueueStatus;
   mediaDecisions?: MediaUnderstandingDecision[];
@@ -461,9 +462,16 @@ export function buildStatusMessage(args: StatusArgs): string {
   const commit = resolveCommitHash();
   const versionLine = `🦞 OpenClaw ${VERSION}${commit ? ` (${commit})` : ""}`;
   const usagePair = formatUsagePair(inputTokens, outputTokens);
-  const costLine = costLabel ? `💵 Cost: ${costLabel}` : null;
+  // Use provided costLine (from session cost summary) if available, otherwise use calculated cost
+  const resolvedCostLine = args.costLine
+    ? args.costLine
+    : costLabel
+      ? `💵 Cost: ${costLabel}`
+      : null;
   const usageCostLine =
-    usagePair && costLine ? `${usagePair} · ${costLine}` : (usagePair ?? costLine);
+    usagePair && resolvedCostLine
+      ? `${usagePair} · ${resolvedCostLine}`
+      : (usagePair ?? resolvedCostLine);
   const mediaLine = formatMediaUnderstandingLine(args.mediaDecisions);
   const voiceLine = formatVoiceModeLine(args.config, args.sessionEntry);
 

@@ -1,5 +1,7 @@
+import type { ModelCostConfig } from "../utils/usage-format.js";
 import { type OpenClawConfig, loadConfig } from "../config/config.js";
 import { resolveOpenClawAgentDir } from "./agent-paths.js";
+import { enrichModelWithPricing } from "./model-pricing-enrichment.js";
 import { ensureOpenClawModelsJson } from "./models-config.js";
 
 export type ModelCatalogEntry = {
@@ -9,6 +11,7 @@ export type ModelCatalogEntry = {
   contextWindow?: number;
   reasoning?: boolean;
   input?: Array<"text" | "image">;
+  cost?: ModelCostConfig;
 };
 
 type DiscoveredModel = {
@@ -18,6 +21,7 @@ type DiscoveredModel = {
   contextWindow?: number;
   reasoning?: boolean;
   input?: Array<"text" | "image">;
+  cost?: ModelCostConfig;
 };
 
 type PiSdkModule = typeof import("./pi-model-discovery.js");
@@ -92,7 +96,13 @@ export async function loadModelCatalog(params?: {
             : undefined;
         const reasoning = typeof entry?.reasoning === "boolean" ? entry.reasoning : undefined;
         const input = Array.isArray(entry?.input) ? entry.input : undefined;
-        models.push({ id, name, provider, contextWindow, reasoning, input });
+        const cost = entry?.cost as ModelCostConfig | undefined;
+        // Enrich model with pricing information (uses discovered cost if available, falls back to pricing DB)
+        const enriched = enrichModelWithPricing(
+          { id, name, provider, contextWindow, reasoning, input, cost },
+          provider,
+        );
+        models.push(enriched);
       }
 
       if (models.length === 0) {
