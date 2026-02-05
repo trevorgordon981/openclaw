@@ -14,6 +14,7 @@ import { estimateUsageCost, resolveModelCostConfig } from "../utils/usage-format
 type ParsedUsageEntry = {
   usage: NormalizedUsage;
   costTotal?: number;
+  isEstimatedCost?: boolean; // Track whether cost was estimated or real
   provider?: string;
   model?: string;
   timestamp?: Date;
@@ -28,6 +29,15 @@ export type CostUsageTotals = {
   totalTokens: number;
   totalCost: number;
   missingCostEntries: number;
+
+  // New fields for cost estimation tracking
+  estimatedCostAmount?: number; // Sum of estimated costs
+  estimationAccuracy?: {
+    // Comparison to real costs
+    realCostCount: number;
+    estimatedCount: number;
+    totalDeviation: number; // Sum of |estimated - real|
+  };
 };
 
 export type CostUsageDailyEntry = CostUsageTotals & {
@@ -71,6 +81,12 @@ const emptyTotals = (): CostUsageTotals => ({
   totalTokens: 0,
   totalCost: 0,
   missingCostEntries: 0,
+  estimatedCostAmount: 0,
+  estimationAccuracy: {
+    realCostCount: 0,
+    estimatedCount: 0,
+    totalDeviation: 0,
+  },
 });
 
 const toFiniteNumber = (value: unknown): number | undefined => {
@@ -178,12 +194,28 @@ const applyUsageTotals = (totals: CostUsageTotals, usage: NormalizedUsage) => {
   totals.totalTokens += totalTokens;
 };
 
-const applyCostTotal = (totals: CostUsageTotals, costTotal: number | undefined) => {
+const applyCostTotal = (
+  totals: CostUsageTotals,
+  costTotal: number | undefined,
+  isEstimated?: boolean,
+) => {
   if (costTotal === undefined) {
     totals.missingCostEntries += 1;
     return;
   }
   totals.totalCost += costTotal;
+
+  // Track estimation accuracy
+  if (isEstimated) {
+    totals.estimatedCostAmount = (totals.estimatedCostAmount ?? 0) + costTotal;
+    if (totals.estimationAccuracy) {
+      totals.estimationAccuracy.estimatedCount += 1;
+    }
+  } else {
+    if (totals.estimationAccuracy) {
+      totals.estimationAccuracy.realCostCount += 1;
+    }
+  }
 };
 
 async function scanUsageFile(params: {
@@ -207,6 +239,7 @@ async function scanUsageFile(params: {
         continue;
       }
 
+      const hadRealCost = entry.costTotal !== undefined;
       if (entry.costTotal === undefined) {
         const cost = resolveModelCostConfig({
           provider: entry.provider,
@@ -214,6 +247,9 @@ async function scanUsageFile(params: {
           config: params.config,
         });
         entry.costTotal = estimateUsageCost({ usage: entry.usage, cost });
+        entry.isEstimatedCost = true; // Mark as estimated
+      } else {
+        entry.isEstimatedCost = false; // Real cost from API
       }
 
       entry.messageIndex = messageIndex++;
@@ -287,11 +323,11 @@ export async function loadCostUsageSummary(params?: {
           const dayKey = formatDayKey(entry.timestamp ?? now);
           const bucket = dailyMap.get(dayKey) ?? emptyTotals();
           applyUsageTotals(bucket, entry.usage);
-          applyCostTotal(bucket, entry.costTotal);
+          applyCostTotal(bucket, entry.costTotal, entry.isEstimatedCost);
           dailyMap.set(dayKey, bucket);
 
           applyUsageTotals(totals, entry.usage);
-          applyCostTotal(totals, entry.costTotal);
+          applyCostTotal(totals, entry.costTotal, entry.isEstimatedCost);
         },
       });
     }
@@ -323,11 +359,11 @@ export async function loadCostUsageSummary(params?: {
           const monthKey = formatMonthKey(entry.timestamp ?? now);
           const bucket = monthlyMap.get(monthKey) ?? emptyTotals();
           applyUsageTotals(bucket, entry.usage);
-          applyCostTotal(bucket, entry.costTotal);
+          applyCostTotal(bucket, entry.costTotal, entry.isEstimatedCost);
           monthlyMap.set(monthKey, bucket);
 
           applyUsageTotals(totals, entry.usage);
-          applyCostTotal(totals, entry.costTotal);
+          applyCostTotal(totals, entry.costTotal, entry.isEstimatedCost);
         },
       });
     }
@@ -359,11 +395,11 @@ export async function loadCostUsageSummary(params?: {
           const yearKey = formatYearKey(entry.timestamp ?? now);
           const bucket = yearlyMap.get(yearKey) ?? emptyTotals();
           applyUsageTotals(bucket, entry.usage);
-          applyCostTotal(bucket, entry.costTotal);
+          applyCostTotal(bucket, entry.costTotal, entry.isEstimatedCost);
           yearlyMap.set(yearKey, bucket);
 
           applyUsageTotals(totals, entry.usage);
-          applyCostTotal(totals, entry.costTotal);
+          applyCostTotal(totals, entry.costTotal, entry.isEstimatedCost);
         },
       });
     }
@@ -405,7 +441,7 @@ export async function loadConversationCostSummary(params: {
       config: params.config,
       onEntry: (entry) => {
         applyUsageTotals(totals, entry.usage);
-        applyCostTotal(totals, entry.costTotal);
+        applyCostTotal(totals, entry.costTotal, entry.isEstimatedCost);
 
         if (entry.timestamp && entry.messageIndex !== undefined) {
           const ts = entry.timestamp.getTime();
@@ -415,7 +451,7 @@ export async function loadConversationCostSummary(params: {
             timestamp: ts,
           };
           applyUsageTotals(conversationEntry, entry.usage);
-          applyCostTotal(conversationEntry, entry.costTotal);
+          applyCostTotal(conversationEntry, entry.costTotal, entry.isEstimatedCost);
           conversation.push(conversationEntry);
         }
       },
@@ -450,7 +486,7 @@ export async function loadSessionCostSummary(params: {
     config: params.config,
     onEntry: (entry) => {
       applyUsageTotals(totals, entry.usage);
-      applyCostTotal(totals, entry.costTotal);
+      applyCostTotal(totals, entry.costTotal, entry.isEstimatedCost);
       const ts = entry.timestamp?.getTime();
       if (ts && (!lastActivity || ts > lastActivity)) {
         lastActivity = ts;
