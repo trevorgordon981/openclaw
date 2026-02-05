@@ -255,8 +255,11 @@ function validateAgentsConfig(agents: unknown, path: string): ValidationError[] 
   const defaults = agentsConfig.defaults as Record<string, unknown> | undefined;
   if (defaults && typeof defaults === "object") {
     const provider = defaults.provider as string | undefined;
-    const model = defaults.model as string | undefined;
-    errors.push(...validateModelConfig(provider, model, `${path}.defaults`));
+    const model = defaults.model;
+    // Only validate if model is a string (not an object with { primary, ... })
+    if (typeof model === "string") {
+      errors.push(...validateModelConfig(provider, model, `${path}.defaults`));
+    }
   }
 
   return errors;
@@ -327,4 +330,42 @@ export function validateConfigOrThrow(config: OpenClawConfig): void {
         `Please fix the configuration and restart the gateway.`,
     );
   }
+}
+
+/**
+ * Validate config object
+ * Returns an object with { ok: boolean, issues, warnings, config }
+ */
+export function validateConfigObject(config: OpenClawConfig): {
+  ok: boolean;
+  issues: ValidationError[];
+  warnings: ValidationError[];
+  config: OpenClawConfig;
+} {
+  const result = validateConfig(config);
+  return {
+    ok: result.valid,
+    issues: result.errors,
+    warnings: [],
+    config,
+  };
+}
+
+/**
+ * Validate config object with plugin support
+ * Returns an object with { ok: boolean, issues, warnings, config }
+ */
+export function validateConfigObjectWithPlugins(config: OpenClawConfig): {
+  ok: boolean;
+  issues: ValidationError[];
+  warnings: ValidationError[];
+  config: OpenClawConfig;
+} {
+  const result = validateConfig(config);
+  return {
+    ok: result.valid,
+    issues: result.errors,
+    warnings: [],
+    config,
+  };
 }
