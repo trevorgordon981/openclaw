@@ -7,6 +7,7 @@
 import type { ModelDefinitionConfig } from "../config/types.models.js";
 import type { ModelCostConfig } from "../utils/usage-format.js";
 import { getAnthropicModelPricing } from "./anthropic-models-pricing.js";
+import { getGeminiModelPricing } from "./gemini-models-pricing.js";
 
 /**
  * Get pricing for a model based on provider and model ID
@@ -27,9 +28,21 @@ export function resolvePricingForModel(
     return getAnthropicModelPricing(normalizedModelId);
   }
 
+  // Google Gemini models
+  if (normalizedProvider === "google") {
+    const pricing = getGeminiModelPricing(normalizedModelId);
+    if (pricing) {
+      return {
+        input: pricing.input,
+        output: pricing.output,
+        cacheRead: pricing.cacheRead ?? 0,
+        cacheWrite: pricing.cacheWrite ?? 0,
+      };
+    }
+  }
+
   // OpenAI models (can be added later)
-  // Google models (can be added later)
-  // etc.
+  // Other providers can be added here as pricing is configured
 
   return undefined;
 }
