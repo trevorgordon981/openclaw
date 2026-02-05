@@ -11,7 +11,6 @@ import {
   sanitizeGoogleTurnOrdering,
   sanitizeSessionMessagesImages,
 } from "../pi-embedded-helpers.js";
-import { cleanToolSchemaForGemini } from "../pi-tools.schema.js";
 import {
   sanitizeToolCallInputs,
   sanitizeToolUseResultPairing,
@@ -169,9 +168,7 @@ export function sanitizeToolsForGoogle<
     }
     return {
       ...tool,
-      parameters: cleanToolSchemaForGemini(
-        tool.parameters as Record<string, unknown>,
-      ) as TSchemaType,
+      parameters: tool.parameters,
     };
   });
 }

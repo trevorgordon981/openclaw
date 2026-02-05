@@ -2,7 +2,6 @@ import type { Llama, LlamaEmbeddingContext, LlamaModel } from "node-llama-cpp";
 import fsSync from "node:fs";
 import type { OpenClawConfig } from "../config/config.js";
 import { resolveUserPath } from "../utils.js";
-import { createGeminiEmbeddingProvider, type GeminiEmbeddingClient } from "./embeddings-gemini.js";
 import { createOpenAiEmbeddingProvider, type OpenAiEmbeddingClient } from "./embeddings-openai.js";
 import { importNodeLlamaCpp } from "./node-llama.js";
 
@@ -15,7 +14,6 @@ function sanitizeAndNormalizeEmbedding(vec: number[]): number[] {
   return sanitized.map((value) => value / magnitude);
 }
 
-export type { GeminiEmbeddingClient } from "./embeddings-gemini.js";
 export type { OpenAiEmbeddingClient } from "./embeddings-openai.js";
 
 export type EmbeddingProvider = {
@@ -27,24 +25,23 @@ export type EmbeddingProvider = {
 
 export type EmbeddingProviderResult = {
   provider: EmbeddingProvider;
-  requestedProvider: "openai" | "local" | "gemini" | "auto";
-  fallbackFrom?: "openai" | "local" | "gemini";
+  requestedProvider: "openai" | "local" | "auto";
+  fallbackFrom?: "openai" | "local";
   fallbackReason?: string;
   openAi?: OpenAiEmbeddingClient;
-  gemini?: GeminiEmbeddingClient;
 };
 
 export type EmbeddingProviderOptions = {
   config: OpenClawConfig;
   agentDir?: string;
-  provider: "openai" | "local" | "gemini" | "auto";
+  provider: "openai" | "local" | "auto";
   remote?: {
     baseUrl?: string;
     apiKey?: string;
     headers?: Record<string, string>;
   };
   model: string;
-  fallback: "openai" | "gemini" | "local" | "none";
+  fallback: "openai" | "local" | "none";
   local?: {
     modelPath?: string;
     modelCacheDir?: string;
@@ -128,20 +125,16 @@ export async function createEmbeddingProvider(
   const requestedProvider = options.provider;
   const fallback = options.fallback;
 
-  const createProvider = async (id: "openai" | "local" | "gemini") => {
+  const createProvider = async (id: "openai" | "local") => {
     if (id === "local") {
       const provider = await createLocalEmbeddingProvider(options);
       return { provider };
-    }
-    if (id === "gemini") {
-      const { provider, client } = await createGeminiEmbeddingProvider(options);
-      return { provider, gemini: client };
     }
     const { provider, client } = await createOpenAiEmbeddingProvider(options);
     return { provider, openAi: client };
   };
 
-  const formatPrimaryError = (err: unknown, provider: "openai" | "local" | "gemini") =>
+  const formatPrimaryError = (err: unknown, provider: "openai" | "local") =>
     provider === "local" ? formatLocalSetupError(err) : formatError(err);
 
   if (requestedProvider === "auto") {
@@ -157,7 +150,7 @@ export async function createEmbeddingProvider(
       }
     }
 
-    for (const provider of ["openai", "gemini"] as const) {
+    for (const provider of ["openai"] as const) {
       try {
         const result = await createProvider(provider);
         return { ...result, requestedProvider };

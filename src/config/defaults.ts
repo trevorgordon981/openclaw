@@ -19,13 +19,6 @@ const DEFAULT_MODEL_ALIASES: Readonly<Record<string, string>> = {
   // OpenAI
   gpt: "openai/gpt-5.2",
   "gpt-mini": "openai/gpt-5-mini",
-
-  // Google Gemini - 2.0-flash is fastest and cheapest
-  gemini: "google/gemini-2.0-flash",
-  "gemini-flash": "google/gemini-2.0-flash",
-  "gemini-pro": "google/gemini-1.5-pro",
-  "gemini-3-pro": "google/gemini-3-pro-preview",
-  "gemini-3-flash": "google/gemini-3-flash-preview",
 };
 
 const DEFAULT_MODEL_COST: ModelDefinitionConfig["cost"] = {

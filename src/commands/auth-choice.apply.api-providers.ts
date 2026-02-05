@@ -8,10 +8,6 @@ import {
 } from "./auth-choice.api-key.js";
 import { applyDefaultModelChoice } from "./auth-choice.default-model.js";
 import {
-  applyGoogleGeminiModelDefault,
-  GOOGLE_GEMINI_DEFAULT_MODEL,
-} from "./google-gemini-model-default.js";
-import {
   applyAuthProfileConfig,
   applyKimiCodeConfig,
   applyKimiCodeProviderConfig,
@@ -39,7 +35,6 @@ import {
   VENICE_DEFAULT_MODEL_REF,
   VERCEL_AI_GATEWAY_DEFAULT_MODEL_REF,
   XIAOMI_DEFAULT_MODEL_REF,
-  setGeminiApiKey,
   setKimiCodingApiKey,
   setMoonshotApiKey,
   setOpencodeZenApiKey,
@@ -86,8 +81,6 @@ export async function applyAuthChoiceApiProviders(
       params.opts.tokenProvider === "kimi-coding"
     ) {
       authChoice = "kimi-code-api-key";
-    } else if (params.opts.tokenProvider === "google") {
-      authChoice = "gemini-api-key";
     } else if (params.opts.tokenProvider === "zai") {
       authChoice = "zai-api-key";
     } else if (params.opts.tokenProvider === "xiaomi") {
@@ -382,53 +375,6 @@ export async function applyAuthChoiceApiProviders(
       });
       nextConfig = applied.config;
       agentModelOverride = applied.agentModelOverride ?? agentModelOverride;
-    }
-    return { config: nextConfig, agentModelOverride };
-  }
-
-  if (authChoice === "gemini-api-key") {
-    let hasCredential = false;
-
-    if (!hasCredential && params.opts?.token && params.opts?.tokenProvider === "google") {
-      await setGeminiApiKey(normalizeApiKeyInput(params.opts.token), params.agentDir);
-      hasCredential = true;
-    }
-
-    const envKey = resolveEnvApiKey("google");
-    if (envKey) {
-      const useExisting = await params.prompter.confirm({
-        message: `Use existing GEMINI_API_KEY (${envKey.source}, ${formatApiKeyPreview(envKey.apiKey)})?`,
-        initialValue: true,
-      });
-      if (useExisting) {
-        await setGeminiApiKey(envKey.apiKey, params.agentDir);
-        hasCredential = true;
-      }
-    }
-    if (!hasCredential) {
-      const key = await params.prompter.text({
-        message: "Enter Gemini API key",
-        validate: validateApiKeyInput,
-      });
-      await setGeminiApiKey(normalizeApiKeyInput(String(key)), params.agentDir);
-    }
-    nextConfig = applyAuthProfileConfig(nextConfig, {
-      profileId: "google:default",
-      provider: "google",
-      mode: "api_key",
-    });
-    if (params.setDefaultModel) {
-      const applied = applyGoogleGeminiModelDefault(nextConfig);
-      nextConfig = applied.next;
-      if (applied.changed) {
-        await params.prompter.note(
-          `Default model set to ${GOOGLE_GEMINI_DEFAULT_MODEL}`,
-          "Model configured",
-        );
-      }
-    } else {
-      agentModelOverride = GOOGLE_GEMINI_DEFAULT_MODEL;
-      await noteAgentModel(GOOGLE_GEMINI_DEFAULT_MODEL);
     }
     return { config: nextConfig, agentModelOverride };
   }

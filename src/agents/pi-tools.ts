@@ -42,7 +42,7 @@ import {
   patchToolSchemaForClaudeCompatibility,
   wrapToolParamNormalization,
 } from "./pi-tools.read.js";
-import { cleanToolSchemaForGemini, normalizeToolParameters } from "./pi-tools.schema.js";
+import { normalizeToolParameters } from "./pi-tools.schema.js";
 import {
   buildPluginToolGroups,
   collectExplicitAllowlist,
@@ -104,7 +104,6 @@ function resolveExecConfig(cfg: OpenClawConfig | undefined) {
 }
 
 export const __testing = {
-  cleanToolSchemaForGemini,
   normalizeToolParams,
   patchToolSchemaForClaudeCompatibility,
   wrapToolParamNormalization,

@@ -20,19 +20,16 @@ import { resolveSessionTranscriptsDirForAgent } from "../config/sessions/paths.j
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { onSessionTranscriptUpdate } from "../sessions/transcript-events.js";
 import { resolveUserPath } from "../utils.js";
-import { runGeminiEmbeddingBatches, type GeminiBatchRequest } from "./batch-gemini.js";
 import {
   OPENAI_BATCH_ENDPOINT,
   type OpenAiBatchRequest,
   runOpenAiEmbeddingBatches,
 } from "./batch-openai.js";
-import { DEFAULT_GEMINI_EMBEDDING_MODEL } from "./embeddings-gemini.js";
 import { DEFAULT_OPENAI_EMBEDDING_MODEL } from "./embeddings-openai.js";
 import {
   createEmbeddingProvider,
   type EmbeddingProvider,
   type EmbeddingProviderResult,
-  type GeminiEmbeddingClient,
   type OpenAiEmbeddingClient,
 } from "./embeddings.js";
 import { bm25RankToScore, buildFtsQuery, mergeHybridResults } from "./hybrid.js";
@@ -112,11 +109,10 @@ export class MemoryIndexManager implements MemorySearchManager {
   private readonly workspaceDir: string;
   private readonly settings: ResolvedMemorySearchConfig;
   private provider: EmbeddingProvider;
-  private readonly requestedProvider: "openai" | "local" | "gemini" | "auto";
-  private fallbackFrom?: "openai" | "local" | "gemini";
+  private readonly requestedProvider: "openai" | "local" | "auto";
+  private fallbackFrom?: "openai" | "local";
   private fallbackReason?: string;
   private openAi?: OpenAiEmbeddingClient;
-  private gemini?: GeminiEmbeddingClient;
   private batch: {
     enabled: boolean;
     wait: boolean;
@@ -216,7 +212,6 @@ export class MemoryIndexManager implements MemorySearchManager {
     this.fallbackFrom = params.providerResult.fallbackFrom;
     this.fallbackReason = params.providerResult.fallbackReason;
     this.openAi = params.providerResult.openAi;
-    this.gemini = params.providerResult.gemini;
     this.sources = new Set(params.settings.sources);
     this.db = this.openDatabase();
     this.providerKey = this.computeProviderKey();
@@ -1343,11 +1338,7 @@ export class MemoryIndexManager implements MemorySearchManager {
     timeoutMs: number;
   } {
     const batch = this.settings.remote?.batch;
-    const enabled = Boolean(
-      batch?.enabled &&
-      ((this.openAi && this.provider.id === "openai") ||
-        (this.gemini && this.provider.id === "gemini")),
-    );
+    const enabled = Boolean(batch?.enabled && this.openAi && this.provider.id === "openai");
     return {
       enabled,
       wait: batch?.wait ?? true,
@@ -1365,14 +1356,10 @@ export class MemoryIndexManager implements MemorySearchManager {
     if (this.fallbackFrom) {
       return false;
     }
-    const fallbackFrom = this.provider.id as "openai" | "gemini" | "local";
+    const fallbackFrom = this.provider.id as "openai" | "local";
 
     const fallbackModel =
-      fallback === "gemini"
-        ? DEFAULT_GEMINI_EMBEDDING_MODEL
-        : fallback === "openai"
-          ? DEFAULT_OPENAI_EMBEDDING_MODEL
-          : this.settings.model;
+      fallback === "openai" ? DEFAULT_OPENAI_EMBEDDING_MODEL : this.settings.model;
 
     const fallbackResult = await createEmbeddingProvider({
       config: this.cfg,
@@ -1388,7 +1375,6 @@ export class MemoryIndexManager implements MemorySearchManager {
     this.fallbackReason = reason;
     this.provider = fallbackResult.provider;
     this.openAi = fallbackResult.openAi;
-    this.gemini = fallbackResult.gemini;
     this.providerKey = this.computeProviderKey();
     this.batch = this.resolveBatchConfig();
     log.warn(`memory embeddings: switched to fallback provider (${fallback})`, { reason });
@@ -1834,23 +1820,6 @@ export class MemoryIndexManager implements MemorySearchManager {
         }),
       );
     }
-    if (this.provider.id === "gemini" && this.gemini) {
-      const entries = Object.entries(this.gemini.headers)
-        .filter(([key]) => {
-          const lower = key.toLowerCase();
-          return lower !== "authorization" && lower !== "x-goog-api-key";
-        })
-        .toSorted(([a], [b]) => a.localeCompare(b))
-        .map(([key, value]) => [key, value]);
-      return hashText(
-        JSON.stringify({
-          provider: "gemini",
-          baseUrl: this.gemini.baseUrl,
-          model: this.gemini.model,
-          headers: entries,
-        }),
-      );
-    }
     return hashText(JSON.stringify({ provider: this.provider.id, model: this.provider.model }));
   }
 
@@ -1861,9 +1830,6 @@ export class MemoryIndexManager implements MemorySearchManager {
   ): Promise<number[][]> {
     if (this.provider.id === "openai" && this.openAi) {
       return this.embedChunksWithOpenAiBatch(chunks, entry, source);
-    }
-    if (this.provider.id === "gemini" && this.gemini) {
-      return this.embedChunksWithGeminiBatch(chunks, entry, source);
     }
     return this.embedChunksInBatches(chunks);
   }
@@ -1921,84 +1887,6 @@ export class MemoryIndexManager implements MemorySearchManager {
       run: async () =>
         await runOpenAiEmbeddingBatches({
           openAi,
-          agentId: this.agentId,
-          requests,
-          wait: this.batch.wait,
-          concurrency: this.batch.concurrency,
-          pollIntervalMs: this.batch.pollIntervalMs,
-          timeoutMs: this.batch.timeoutMs,
-          debug: (message, data) => log.debug(message, { ...data, source, chunks: chunks.length }),
-        }),
-      fallback: async () => await this.embedChunksInBatches(chunks),
-    });
-    if (Array.isArray(batchResult)) {
-      return batchResult;
-    }
-    const byCustomId = batchResult;
-
-    const toCache: Array<{ hash: string; embedding: number[] }> = [];
-    for (const [customId, embedding] of byCustomId.entries()) {
-      const mapped = mapping.get(customId);
-      if (!mapped) {
-        continue;
-      }
-      embeddings[mapped.index] = embedding;
-      toCache.push({ hash: mapped.hash, embedding });
-    }
-    this.upsertEmbeddingCache(toCache);
-    return embeddings;
-  }
-
-  private async embedChunksWithGeminiBatch(
-    chunks: MemoryChunk[],
-    entry: MemoryFileEntry | SessionFileEntry,
-    source: MemorySource,
-  ): Promise<number[][]> {
-    const gemini = this.gemini;
-    if (!gemini) {
-      return this.embedChunksInBatches(chunks);
-    }
-    if (chunks.length === 0) {
-      return [];
-    }
-    const cached = this.loadEmbeddingCache(chunks.map((chunk) => chunk.hash));
-    const embeddings: number[][] = Array.from({ length: chunks.length }, () => []);
-    const missing: Array<{ index: number; chunk: MemoryChunk }> = [];
-
-    for (let i = 0; i < chunks.length; i += 1) {
-      const chunk = chunks[i];
-      const hit = chunk?.hash ? cached.get(chunk.hash) : undefined;
-      if (hit && hit.length > 0) {
-        embeddings[i] = hit;
-      } else if (chunk) {
-        missing.push({ index: i, chunk });
-      }
-    }
-
-    if (missing.length === 0) {
-      return embeddings;
-    }
-
-    const requests: GeminiBatchRequest[] = [];
-    const mapping = new Map<string, { index: number; hash: string }>();
-    for (const item of missing) {
-      const chunk = item.chunk;
-      const customId = hashText(
-        `${source}:${entry.path}:${chunk.startLine}:${chunk.endLine}:${chunk.hash}:${item.index}`,
-      );
-      mapping.set(customId, { index: item.index, hash: chunk.hash });
-      requests.push({
-        custom_id: customId,
-        content: { parts: [{ text: chunk.text }] },
-        taskType: "RETRIEVAL_DOCUMENT",
-      });
-    }
-
-    const batchResult = await this.runBatchWithFallback({
-      provider: "gemini",
-      run: async () =>
-        await runGeminiEmbeddingBatches({
-          gemini,
           agentId: this.agentId,
           requests,
           wait: this.batch.wait,

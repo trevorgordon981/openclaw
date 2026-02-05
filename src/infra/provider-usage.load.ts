@@ -10,7 +10,6 @@ import {
   fetchClaudeUsage,
   fetchCodexUsage,
   fetchCopilotUsage,
-  fetchGeminiUsage,
   fetchMinimaxUsage,
   fetchZaiUsage,
 } from "./provider-usage.fetch.js";
@@ -60,8 +59,6 @@ export async function loadProviderUsageSummary(
             return await fetchCopilotUsage(auth.token, timeoutMs, fetchFn);
           case "google-antigravity":
             return await fetchAntigravityUsage(auth.token, timeoutMs, fetchFn);
-          case "google-gemini-cli":
-            return await fetchGeminiUsage(auth.token, timeoutMs, fetchFn, auth.provider);
           case "openai-codex":
             return await fetchCodexUsage(auth.token, auth.accountId, timeoutMs, fetchFn);
           case "minimax":

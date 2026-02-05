@@ -1,5 +1,4 @@
 import type { AnyAgentTool } from "./pi-tools.types.js";
-import { cleanSchemaForGemini } from "./schema/clean-for-gemini.js";
 
 function extractEnumValues(schema: unknown): unknown[] | undefined {
   if (!schema || typeof schema !== "object") {
@@ -72,19 +71,15 @@ export function normalizeToolParameters(tool: AnyAgentTool): AnyAgentTool {
   }
 
   // Provider quirks:
-  // - Gemini rejects several JSON Schema keywords, so we scrub those.
   // - OpenAI rejects function tool schemas unless the *top-level* is `type: "object"`.
   //   (TypeBox root unions compile to `{ anyOf: [...] }` without `type`).
   //
   // Normalize once here so callers can always pass `tools` through unchanged.
 
   // If schema already has type + properties (no top-level anyOf to merge),
-  // still clean it for Gemini compatibility
+  // return as-is
   if ("type" in schema && "properties" in schema && !Array.isArray(schema.anyOf)) {
-    return {
-      ...tool,
-      parameters: cleanSchemaForGemini(schema),
-    };
+    return tool;
   }
 
   // Some tool schemas (esp. unions) may omit `type` at the top-level. If we see
@@ -97,7 +92,7 @@ export function normalizeToolParameters(tool: AnyAgentTool): AnyAgentTool {
   ) {
     return {
       ...tool,
-      parameters: cleanSchemaForGemini({ ...schema, type: "object" }),
+      parameters: { ...schema, type: "object" },
     };
   }
 
@@ -157,10 +152,9 @@ export function normalizeToolParameters(tool: AnyAgentTool): AnyAgentTool {
   return {
     ...tool,
     // Flatten union schemas into a single object schema:
-    // - Gemini doesn't allow top-level `type` together with `anyOf`.
     // - OpenAI rejects schemas without top-level `type: "object"`.
     // Merging properties preserves useful enums like `action` while keeping schemas portable.
-    parameters: cleanSchemaForGemini({
+    parameters: {
       type: "object",
       ...(typeof nextSchema.title === "string" ? { title: nextSchema.title } : {}),
       ...(typeof nextSchema.description === "string"
@@ -170,10 +164,6 @@ export function normalizeToolParameters(tool: AnyAgentTool): AnyAgentTool {
         Object.keys(mergedProperties).length > 0 ? mergedProperties : (schema.properties ?? {}),
       ...(mergedRequired && mergedRequired.length > 0 ? { required: mergedRequired } : {}),
       additionalProperties: "additionalProperties" in schema ? schema.additionalProperties : true,
-    }),
+    },
   };
-}
-
-export function cleanToolSchemaForGemini(schema: Record<string, unknown>): unknown {
-  return cleanSchemaForGemini(schema);
 }

@@ -7,7 +7,6 @@ import { parseDurationMs } from "../../../cli/parse-duration.js";
 import { upsertSharedEnvVar } from "../../../infra/env-file.js";
 import { shortenHomePath } from "../../../utils.js";
 import { buildTokenProfileId, validateAnthropicSetupToken } from "../../auth-token.js";
-import { applyGoogleGeminiModelDefault } from "../../google-gemini-model-default.js";
 import {
   applyAuthProfileConfig,
   applyKimiCodeConfig,
@@ -23,7 +22,6 @@ import {
   applyXiaomiConfig,
   applyZaiConfig,
   setAnthropicApiKey,
-  setGeminiApiKey,
   setKimiCodingApiKey,
   setMinimaxApiKey,
   setMoonshotApiKey,
@@ -144,29 +142,6 @@ export async function applyNonInteractiveAuthChoice(params: {
       provider,
       mode: "token",
     });
-  }
-
-  if (authChoice === "gemini-api-key") {
-    const resolved = await resolveNonInteractiveApiKey({
-      provider: "google",
-      cfg: baseConfig,
-      flagValue: opts.geminiApiKey,
-      flagName: "--gemini-api-key",
-      envVar: "GEMINI_API_KEY",
-      runtime,
-    });
-    if (!resolved) {
-      return null;
-    }
-    if (resolved.source !== "profile") {
-      await setGeminiApiKey(resolved.key);
-    }
-    nextConfig = applyAuthProfileConfig(nextConfig, {
-      profileId: "google:default",
-      provider: "google",
-      mode: "api_key",
-    });
-    return applyGoogleGeminiModelDefault(nextConfig).next;
   }
 
   if (authChoice === "zai-api-key") {
