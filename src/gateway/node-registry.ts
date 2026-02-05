@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
 import type { GatewayWsClient } from "./server/ws-types.js";
 
 export type NodeSession = {
@@ -35,10 +37,28 @@ export type NodeInvokeResult = {
   error?: { code?: string; message?: string } | null;
 };
 
+export type PersistentNodeRegistry = {
+  nodeId: string;
+  lastConnectedAt: number;
+  platform?: string;
+  version?: string;
+  pendingOperations: Array<{
+    id: string;
+    command: string;
+    startedAt: number;
+  }>;
+};
+
 export class NodeRegistry {
   private nodesById = new Map<string, NodeSession>();
   private nodesByConn = new Map<string, string>();
   private pendingInvokes = new Map<string, PendingInvoke>();
+  private persistencePath: string;
+
+  constructor(persistencePath?: string) {
+    this.persistencePath =
+      persistencePath || path.join(process.cwd(), ".openclaw/gateway/node-registry.json");
+  }
 
   register(client: GatewayWsClient, opts: { remoteIp?: string | undefined }) {
     const connect = client.connect;
@@ -205,5 +225,46 @@ export class NodeRegistry {
 
   private sendEventToSession(node: NodeSession, event: string, payload: unknown): boolean {
     return this.sendEventInternal(node, event, payload);
+  }
+
+  async saveState(): Promise<void> {
+    const state = Array.from(this.nodesById.values()).map((node) => ({
+      nodeId: node.nodeId,
+      lastConnectedAt: node.connectedAtMs,
+      platform: node.platform,
+      version: node.version,
+      pendingOperations: Array.from(this.pendingInvokes.values())
+        .filter((p) => p.nodeId === node.nodeId)
+        .map((p) => ({
+          id: p.command,
+          command: p.command,
+          startedAt: Date.now(),
+        })),
+    }));
+
+    try {
+      await fs.mkdir(path.dirname(this.persistencePath), { recursive: true });
+      await fs.writeFile(this.persistencePath, JSON.stringify(state, null, 2));
+    } catch (err) {
+      console.error(`Failed to save node registry state: ${String(err)}`);
+    }
+  }
+
+  async loadState(): Promise<PersistentNodeRegistry[]> {
+    try {
+      const data = await fs.readFile(this.persistencePath, "utf-8");
+      return JSON.parse(data);
+    } catch {
+      return [];
+    }
+  }
+
+  onGatewayShutdown(): void {
+    // Fail pending invokes gracefully
+    for (const [id, pending] of this.pendingInvokes.entries()) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error("gateway shutting down"));
+    }
+    this.pendingInvokes.clear();
   }
 }

@@ -124,6 +124,13 @@ async function uploadSlackFile(params: {
   return fileId;
 }
 
+const SLACK_RATE_LIMIT_BACKOFF_MS = 60_000;
+const SLACK_SERVER_ERROR_BACKOFF_MS = 5_000;
+
+async function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export async function sendMessageSlack(
   to: string,
   message: string,
@@ -204,4 +211,45 @@ export async function sendMessageSlack(
     messageId: lastMessageId || "unknown",
     channelId,
   };
+}
+
+export async function sendMessageSlackWithRetry(
+  to: string,
+  message: string,
+  opts: SlackSendOpts = {},
+  retryContext: { attempt: number } = { attempt: 0 },
+): Promise<SlackSendResult> {
+  try {
+    return await sendMessageSlack(to, message, opts);
+  } catch (err) {
+    const slackErr = err as { code?: string; message?: string };
+
+    // Rate limited: wait longer and retry
+    if (
+      slackErr.code === "rate_limited" ||
+      slackErr.message?.includes("429") ||
+      slackErr.message?.includes("Too Many Requests")
+    ) {
+      if (retryContext.attempt < 3) {
+        const delay = SLACK_RATE_LIMIT_BACKOFF_MS * Math.pow(2, retryContext.attempt);
+        logVerbose(`Slack rate limit hit, backing off ${delay}ms`);
+        await sleep(delay);
+        return sendMessageSlackWithRetry(to, message, opts, { attempt: retryContext.attempt + 1 });
+      }
+      throw new Error(`Slack rate limit exceeded after ${retryContext.attempt} retries`);
+    }
+
+    // Server error: exponential backoff
+    if (slackErr.code?.startsWith("5") || slackErr.message?.includes("500")) {
+      if (retryContext.attempt < 2) {
+        const delay = SLACK_SERVER_ERROR_BACKOFF_MS * Math.pow(2, retryContext.attempt);
+        logVerbose(`Slack server error, backing off ${delay}ms`);
+        await sleep(delay);
+        return sendMessageSlackWithRetry(to, message, opts, { attempt: retryContext.attempt + 1 });
+      }
+      throw new Error(`Slack server error after ${retryContext.attempt} retries`);
+    }
+
+    throw err;
+  }
 }

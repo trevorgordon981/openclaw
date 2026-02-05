@@ -6,7 +6,7 @@ import { chunkMarkdownTextWithMode } from "../../auto-reply/chunk.js";
 import { createReplyReferencePlanner } from "../../auto-reply/reply/reply-reference.js";
 import { isSilentReplyText, SILENT_REPLY_TOKEN } from "../../auto-reply/tokens.js";
 import { markdownToSlackMrkdwnChunks } from "../format.js";
-import { sendMessageSlack } from "../send.js";
+import { sendMessageSlackWithRetry } from "../send.js";
 
 export async function deliverReplies(params: {
   replies: ReplyPayload[];
@@ -30,22 +30,41 @@ export async function deliverReplies(params: {
       if (!trimmed || isSilentReplyText(trimmed, SILENT_REPLY_TOKEN)) {
         continue;
       }
-      await sendMessageSlack(params.target, trimmed, {
-        token: params.token,
-        threadTs,
-        accountId: params.accountId,
-      });
+      try {
+        await sendMessageSlackWithRetry(params.target, trimmed, {
+          token: params.token,
+          threadTs,
+          accountId: params.accountId,
+        });
+      } catch (err) {
+        params.runtime.error?.(`Slack send failed after retries: ${String(err)}`);
+      }
     } else {
       let first = true;
       for (const mediaUrl of mediaList) {
         const caption = first ? text : "";
         first = false;
-        await sendMessageSlack(params.target, caption, {
-          token: params.token,
-          mediaUrl,
-          threadTs,
-          accountId: params.accountId,
-        });
+        try {
+          await sendMessageSlackWithRetry(params.target, caption, {
+            token: params.token,
+            mediaUrl,
+            threadTs,
+            accountId: params.accountId,
+          });
+        } catch (uploadErr) {
+          // Fallback: Send text without media
+          params.runtime.error?.(`File upload failed, sending text-only: ${String(uploadErr)}`);
+          try {
+            const fallbackText = caption || `📎 Media unavailable`;
+            await sendMessageSlackWithRetry(params.target, fallbackText, {
+              token: params.token,
+              threadTs,
+              accountId: params.accountId,
+            });
+          } catch (fallbackErr) {
+            params.runtime.error?.(`Slack fallback send also failed: ${String(fallbackErr)}`);
+          }
+        }
       }
     }
     params.runtime.log?.(`delivered reply to ${params.target}`);
