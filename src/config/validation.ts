@@ -1,361 +1,330 @@
-import path from "node:path";
-import type { OpenClawConfig, ConfigValidationIssue } from "./types.js";
-import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "../agents/agent-scope.js";
-import { CHANNEL_IDS, normalizeChatChannelId } from "../channels/registry.js";
-import {
-  normalizePluginsConfig,
-  resolveEnableState,
-  resolveMemorySlotDecision,
-} from "../plugins/config-state.js";
-import { loadPluginManifestRegistry } from "../plugins/manifest-registry.js";
-import { validateJsonSchemaValue } from "../plugins/schema-validator.js";
-import { findDuplicateAgentDirs, formatDuplicateAgentDirError } from "./agent-dirs.js";
-import { applyAgentDefaults, applyModelDefaults, applySessionDefaults } from "./defaults.js";
-import { findLegacyConfigIssues } from "./legacy.js";
-import { OpenClawSchema } from "./zod-schema.js";
+import type { OpenClawConfig } from "./types.js";
 
-const AVATAR_SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
-const AVATAR_DATA_RE = /^data:/i;
-const AVATAR_HTTP_RE = /^https?:\/\//i;
-const WINDOWS_ABS_RE = /^[a-zA-Z]:[\\/]/;
+/**
+ * Configuration Validation Module
+ *
+ * Validates critical configuration settings at startup to prevent runtime failures.
+ * Provides fast-fail with clear error messages for invalid configurations.
+ */
 
-function isWorkspaceAvatarPath(value: string, workspaceDir: string): boolean {
-  const workspaceRoot = path.resolve(workspaceDir);
-  const resolved = path.resolve(workspaceRoot, value);
-  const relative = path.relative(workspaceRoot, resolved);
-  if (relative === "") {
-    return true;
-  }
-  if (relative.startsWith("..")) {
-    return false;
-  }
-  return !path.isAbsolute(relative);
+export interface ValidationError {
+  path: string;
+  message: string;
 }
 
-function validateIdentityAvatar(config: OpenClawConfig): ConfigValidationIssue[] {
-  const agents = config.agents?.list;
-  if (!Array.isArray(agents) || agents.length === 0) {
-    return [];
-  }
-  const issues: ConfigValidationIssue[] = [];
-  for (const [index, entry] of agents.entries()) {
-    if (!entry || typeof entry !== "object") {
-      continue;
-    }
-    const avatarRaw = entry.identity?.avatar;
-    if (typeof avatarRaw !== "string") {
-      continue;
-    }
-    const avatar = avatarRaw.trim();
-    if (!avatar) {
-      continue;
-    }
-    if (AVATAR_DATA_RE.test(avatar) || AVATAR_HTTP_RE.test(avatar)) {
-      continue;
-    }
-    if (avatar.startsWith("~")) {
-      issues.push({
-        path: `agents.list.${index}.identity.avatar`,
-        message: "identity.avatar must be a workspace-relative path, http(s) URL, or data URI.",
-      });
-      continue;
-    }
-    const hasScheme = AVATAR_SCHEME_RE.test(avatar);
-    if (hasScheme && !WINDOWS_ABS_RE.test(avatar)) {
-      issues.push({
-        path: `agents.list.${index}.identity.avatar`,
-        message: "identity.avatar must be a workspace-relative path, http(s) URL, or data URI.",
-      });
-      continue;
-    }
-    const workspaceDir = resolveAgentWorkspaceDir(
-      config,
-      entry.id ?? resolveDefaultAgentId(config),
-    );
-    if (!isWorkspaceAvatarPath(avatar, workspaceDir)) {
-      issues.push({
-        path: `agents.list.${index}.identity.avatar`,
-        message: "identity.avatar must stay within the agent workspace.",
-      });
-    }
-  }
-  return issues;
+export interface ValidationResult {
+  valid: boolean;
+  errors: ValidationError[];
 }
 
-export function validateConfigObject(
-  raw: unknown,
-): { ok: true; config: OpenClawConfig } | { ok: false; issues: ConfigValidationIssue[] } {
-  const legacyIssues = findLegacyConfigIssues(raw);
-  if (legacyIssues.length > 0) {
-    return {
-      ok: false,
-      issues: legacyIssues.map((iss) => ({
-        path: iss.path,
-        message: iss.message,
-      })),
-    };
-  }
-  const validated = OpenClawSchema.safeParse(raw);
-  if (!validated.success) {
-    return {
-      ok: false,
-      issues: validated.error.issues.map((iss) => ({
-        path: iss.path.join("."),
-        message: iss.message,
-      })),
-    };
-  }
-  const duplicates = findDuplicateAgentDirs(validated.data as OpenClawConfig);
-  if (duplicates.length > 0) {
-    return {
-      ok: false,
-      issues: [
-        {
-          path: "agents.list",
-          message: formatDuplicateAgentDirError(duplicates),
-        },
-      ],
-    };
-  }
-  const avatarIssues = validateIdentityAvatar(validated.data as OpenClawConfig);
-  if (avatarIssues.length > 0) {
-    return { ok: false, issues: avatarIssues };
-  }
-  return {
-    ok: true,
-    config: applyModelDefaults(
-      applyAgentDefaults(applySessionDefaults(validated.data as OpenClawConfig)),
-    ),
-  };
-}
+/**
+ * Validate port number is within valid range
+ */
+function validatePort(port: number, path: string): ValidationError[] {
+  const errors: ValidationError[] = [];
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-export function validateConfigObjectWithPlugins(raw: unknown):
-  | {
-      ok: true;
-      config: OpenClawConfig;
-      warnings: ConfigValidationIssue[];
-    }
-  | {
-      ok: false;
-      issues: ConfigValidationIssue[];
-      warnings: ConfigValidationIssue[];
-    } {
-  const base = validateConfigObject(raw);
-  if (!base.ok) {
-    return { ok: false, issues: base.issues, warnings: [] };
+  if (!Number.isInteger(port)) {
+    errors.push({
+      path,
+      message: `Port must be an integer, got: ${port}`,
+    });
+    return errors;
   }
 
-  const config = base.config;
-  const issues: ConfigValidationIssue[] = [];
-  const warnings: ConfigValidationIssue[] = [];
-  const pluginsConfig = config.plugins;
-  const normalizedPlugins = normalizePluginsConfig(pluginsConfig);
-
-  const workspaceDir = resolveAgentWorkspaceDir(config, resolveDefaultAgentId(config));
-  const registry = loadPluginManifestRegistry({
-    config,
-    workspaceDir: workspaceDir ?? undefined,
-  });
-
-  const knownIds = new Set(registry.plugins.map((record) => record.id));
-
-  for (const diag of registry.diagnostics) {
-    let path = diag.pluginId ? `plugins.entries.${diag.pluginId}` : "plugins";
-    if (!diag.pluginId && diag.message.includes("plugin path not found")) {
-      path = "plugins.load.paths";
-    }
-    const pluginLabel = diag.pluginId ? `plugin ${diag.pluginId}` : "plugin";
-    const message = `${pluginLabel}: ${diag.message}`;
-    if (diag.level === "error") {
-      issues.push({ path, message });
-    } else {
-      warnings.push({ path, message });
-    }
+  if (port < 0 || port > 65535) {
+    errors.push({
+      path,
+      message: `Port must be between 0 and 65535, got: ${port}`,
+    });
+    return errors;
   }
 
-  const entries = pluginsConfig?.entries;
-  if (entries && isRecord(entries)) {
-    for (const pluginId of Object.keys(entries)) {
-      if (!knownIds.has(pluginId)) {
-        issues.push({
-          path: `plugins.entries.${pluginId}`,
-          message: `plugin not found: ${pluginId}`,
-        });
-      }
-    }
-  }
-
-  const allow = pluginsConfig?.allow ?? [];
-  for (const pluginId of allow) {
-    if (typeof pluginId !== "string" || !pluginId.trim()) {
-      continue;
-    }
-    if (!knownIds.has(pluginId)) {
-      issues.push({
-        path: "plugins.allow",
-        message: `plugin not found: ${pluginId}`,
-      });
-    }
-  }
-
-  const deny = pluginsConfig?.deny ?? [];
-  for (const pluginId of deny) {
-    if (typeof pluginId !== "string" || !pluginId.trim()) {
-      continue;
-    }
-    if (!knownIds.has(pluginId)) {
-      issues.push({
-        path: "plugins.deny",
-        message: `plugin not found: ${pluginId}`,
-      });
-    }
-  }
-
-  const memorySlot = normalizedPlugins.slots.memory;
-  if (typeof memorySlot === "string" && memorySlot.trim() && !knownIds.has(memorySlot)) {
-    issues.push({
-      path: "plugins.slots.memory",
-      message: `plugin not found: ${memorySlot}`,
+  if (port < 1024) {
+    errors.push({
+      path,
+      message: `Port ${port} requires elevated privileges (< 1024)`,
     });
   }
 
-  const allowedChannels = new Set<string>(["defaults", ...CHANNEL_IDS]);
-  for (const record of registry.plugins) {
-    for (const channelId of record.channels) {
-      allowedChannels.add(channelId);
-    }
+  return errors;
+}
+
+/**
+ * Validate timeout value is positive
+ */
+function validateTimeout(value: number, path: string): ValidationError[] {
+  const errors: ValidationError[] = [];
+
+  if (typeof value !== "number" || value <= 0) {
+    errors.push({
+      path,
+      message: `Timeout must be a positive number, got: ${value}`,
+    });
   }
 
-  if (config.channels && isRecord(config.channels)) {
-    for (const key of Object.keys(config.channels)) {
-      const trimmed = key.trim();
-      if (!trimmed) {
-        continue;
-      }
-      if (!allowedChannels.has(trimmed)) {
-        issues.push({
-          path: `channels.${trimmed}`,
-          message: `unknown channel id: ${trimmed}`,
-        });
-      }
-    }
+  return errors;
+}
+
+/**
+ * Validate that API key is present (not empty or whitespace)
+ */
+function validateApiKey(value: unknown, path: string, required = false): ValidationError[] {
+  const errors: ValidationError[] = [];
+
+  if (required && !value) {
+    errors.push({
+      path,
+      message: "API key is required but not provided",
+    });
+    return errors;
   }
 
-  const heartbeatChannelIds = new Set<string>();
-  for (const channelId of CHANNEL_IDS) {
-    heartbeatChannelIds.add(channelId.toLowerCase());
-  }
-  for (const record of registry.plugins) {
-    for (const channelId of record.channels) {
-      const trimmed = channelId.trim();
-      if (trimmed) {
-        heartbeatChannelIds.add(trimmed.toLowerCase());
-      }
-    }
-  }
-
-  const validateHeartbeatTarget = (target: string | undefined, path: string) => {
-    if (typeof target !== "string") {
-      return;
-    }
-    const trimmed = target.trim();
-    if (!trimmed) {
-      issues.push({ path, message: "heartbeat target must not be empty" });
-      return;
-    }
-    const normalized = trimmed.toLowerCase();
-    if (normalized === "last" || normalized === "none") {
-      return;
-    }
-    if (normalizeChatChannelId(trimmed)) {
-      return;
-    }
-    if (heartbeatChannelIds.has(normalized)) {
-      return;
-    }
-    issues.push({ path, message: `unknown heartbeat target: ${target}` });
-  };
-
-  validateHeartbeatTarget(
-    config.agents?.defaults?.heartbeat?.target,
-    "agents.defaults.heartbeat.target",
-  );
-  if (Array.isArray(config.agents?.list)) {
-    for (const [index, entry] of config.agents.list.entries()) {
-      validateHeartbeatTarget(entry?.heartbeat?.target, `agents.list.${index}.heartbeat.target`);
-    }
-  }
-
-  let selectedMemoryPluginId: string | null = null;
-  const seenPlugins = new Set<string>();
-  for (const record of registry.plugins) {
-    const pluginId = record.id;
-    if (seenPlugins.has(pluginId)) {
-      continue;
-    }
-    seenPlugins.add(pluginId);
-    const entry = normalizedPlugins.entries[pluginId];
-    const entryHasConfig = Boolean(entry?.config);
-
-    const enableState = resolveEnableState(pluginId, record.origin, normalizedPlugins);
-    let enabled = enableState.enabled;
-    let reason = enableState.reason;
-
-    if (enabled) {
-      const memoryDecision = resolveMemorySlotDecision({
-        id: pluginId,
-        kind: record.kind,
-        slot: memorySlot,
-        selectedId: selectedMemoryPluginId,
+  if (value && typeof value === "string") {
+    if (value.trim() === "") {
+      errors.push({
+        path,
+        message: "API key cannot be empty or whitespace",
       });
-      if (!memoryDecision.enabled) {
-        enabled = false;
-        reason = memoryDecision.reason;
-      }
-      if (memoryDecision.selected && record.kind === "memory") {
-        selectedMemoryPluginId = pluginId;
-      }
     }
+  }
 
-    const shouldValidate = enabled || entryHasConfig;
-    if (shouldValidate) {
-      if (record.configSchema) {
-        const res = validateJsonSchemaValue({
-          schema: record.configSchema,
-          cacheKey: record.schemaCacheKey ?? record.manifestPath ?? pluginId,
-          value: entry?.config ?? {},
-        });
-        if (!res.ok) {
-          for (const error of res.errors) {
-            issues.push({
-              path: `plugins.entries.${pluginId}.config`,
-              message: `invalid config: ${error}`,
-            });
-          }
+  return errors;
+}
+
+/**
+ * Validate model configuration (provider/model pair is valid)
+ */
+function validateModelConfig(
+  provider: string | undefined,
+  model: string | undefined,
+  path: string,
+): ValidationError[] {
+  const errors: ValidationError[] = [];
+
+  // Only validate if both are provided
+  if (!provider && !model) {
+    return errors;
+  }
+
+  if (!provider && model) {
+    errors.push({
+      path: `${path}.provider`,
+      message: `Provider is required when model is specified`,
+    });
+  }
+
+  if (provider && !model) {
+    errors.push({
+      path: `${path}.model`,
+      message: `Model is required when provider is specified`,
+    });
+  }
+
+  // Validate provider format (simple check for alphanumeric and hyphens)
+  if (provider && !/^[a-zA-Z0-9-_]+$/.test(provider)) {
+    errors.push({
+      path: `${path}.provider`,
+      message: `Invalid provider format: "${provider}". Must contain only alphanumeric characters, hyphens, or underscores`,
+    });
+  }
+
+  // Validate model format
+  if (model && !/^[a-zA-Z0-9-_./]+$/.test(model)) {
+    errors.push({
+      path: `${path}.model`,
+      message: `Invalid model format: "${model}". Must contain only alphanumeric characters, hyphens, underscores, dots, or slashes`,
+    });
+  }
+
+  return errors;
+}
+
+/**
+ * Validate Slack configuration
+ */
+function validateSlackConfig(slack: unknown, path: string): ValidationError[] {
+  const errors: ValidationError[] = [];
+
+  if (!slack || typeof slack !== "object") {
+    return errors;
+  }
+
+  const slackConfig = slack as Record<string, unknown>;
+
+  // If using default token, validate it
+  if (slackConfig.defaultBotToken) {
+    errors.push(...validateApiKey(slackConfig.defaultBotToken, `${path}.defaultBotToken`, true));
+  }
+
+  // Validate per-account tokens if present
+  const accounts = slackConfig.accounts as Record<string, unknown> | undefined;
+  if (accounts && typeof accounts === "object") {
+    for (const [accountId, account] of Object.entries(accounts)) {
+      if (account && typeof account === "object") {
+        const botToken = (account as Record<string, unknown>).botToken;
+        if (botToken) {
+          errors.push(...validateApiKey(botToken, `${path}.accounts.${accountId}.botToken`, true));
         }
-      } else {
-        issues.push({
-          path: `plugins.entries.${pluginId}`,
-          message: `plugin schema missing for ${pluginId}`,
-        });
       }
     }
+  }
 
-    if (!enabled && entryHasConfig) {
-      warnings.push({
-        path: `plugins.entries.${pluginId}`,
-        message: `plugin disabled (${reason ?? "disabled"}) but config is present`,
-      });
+  return errors;
+}
+
+/**
+ * Validate Discord configuration
+ */
+function validateDiscordConfig(discord: unknown, path: string): ValidationError[] {
+  const errors: ValidationError[] = [];
+
+  if (!discord || typeof discord !== "object") {
+    return errors;
+  }
+
+  const discordConfig = discord as Record<string, unknown>;
+
+  if (discordConfig.botToken) {
+    errors.push(...validateApiKey(discordConfig.botToken, `${path}.botToken`, true));
+  }
+
+  return errors;
+}
+
+/**
+ * Validate OpenAI configuration
+ */
+function validateOpenAiConfig(openai: unknown, path: string): ValidationError[] {
+  const errors: ValidationError[] = [];
+
+  if (!openai || typeof openai !== "object") {
+    return errors;
+  }
+
+  const openaiConfig = openai as Record<string, unknown>;
+
+  if (openaiConfig.apiKey) {
+    errors.push(...validateApiKey(openaiConfig.apiKey, `${path}.apiKey`, true));
+  }
+
+  return errors;
+}
+
+/**
+ * Validate gateway configuration
+ */
+function validateGatewayConfig(gateway: unknown, path: string): ValidationError[] {
+  const errors: ValidationError[] = [];
+
+  if (!gateway || typeof gateway !== "object") {
+    return errors;
+  }
+
+  const gatewayConfig = gateway as Record<string, unknown>;
+
+  // Validate port if specified
+  if (typeof gatewayConfig.port === "number") {
+    errors.push(...validatePort(gatewayConfig.port, `${path}.port`));
+  }
+
+  // Validate timeouts if specified
+  if (typeof gatewayConfig.readTimeout === "number") {
+    errors.push(...validateTimeout(gatewayConfig.readTimeout, `${path}.readTimeout`));
+  }
+
+  if (typeof gatewayConfig.writeTimeout === "number") {
+    errors.push(...validateTimeout(gatewayConfig.writeTimeout, `${path}.writeTimeout`));
+  }
+
+  return errors;
+}
+
+/**
+ * Validate agents/models configuration
+ */
+function validateAgentsConfig(agents: unknown, path: string): ValidationError[] {
+  const errors: ValidationError[] = [];
+
+  if (!agents || typeof agents !== "object") {
+    return errors;
+  }
+
+  const agentsConfig = agents as Record<string, unknown>;
+
+  // Validate defaults.provider and defaults.model
+  const defaults = agentsConfig.defaults as Record<string, unknown> | undefined;
+  if (defaults && typeof defaults === "object") {
+    const provider = defaults.provider as string | undefined;
+    const model = defaults.model as string | undefined;
+    errors.push(...validateModelConfig(provider, model, `${path}.defaults`));
+  }
+
+  return errors;
+}
+
+/**
+ * Validate the entire configuration
+ */
+export function validateConfig(config: OpenClawConfig): ValidationResult {
+  const errors: ValidationError[] = [];
+
+  if (!config) {
+    return {
+      valid: false,
+      errors: [{ path: "<root>", message: "Configuration is empty or missing" }],
+    };
+  }
+
+  // Validate channel configurations
+  if (config.channels && typeof config.channels === "object") {
+    const channelsConfig = config.channels as Record<string, unknown>;
+
+    if (channelsConfig.slack) {
+      errors.push(...validateSlackConfig(channelsConfig.slack, "channels.slack"));
+    }
+
+    if (channelsConfig.discord) {
+      errors.push(...validateDiscordConfig(channelsConfig.discord, "channels.discord"));
     }
   }
 
-  if (issues.length > 0) {
-    return { ok: false, issues, warnings };
+  // Validate providers configuration
+  if (config.providers && typeof config.providers === "object") {
+    const providersConfig = config.providers as Record<string, unknown>;
+
+    if (providersConfig.openai) {
+      errors.push(...validateOpenAiConfig(providersConfig.openai, "providers.openai"));
+    }
   }
 
-  return { ok: true, config, warnings };
+  // Validate gateway configuration
+  if (config.gateway) {
+    errors.push(...validateGatewayConfig(config.gateway, "gateway"));
+  }
+
+  // Validate agents configuration
+  if (config.agents) {
+    errors.push(...validateAgentsConfig(config.agents, "agents"));
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+  };
+}
+
+/**
+ * Validate and throw if config is invalid
+ */
+export function validateConfigOrThrow(config: OpenClawConfig): void {
+  const result = validateConfig(config);
+
+  if (!result.valid) {
+    const errorMessages = result.errors.map((err) => `  ${err.path}: ${err.message}`).join("\n");
+
+    throw new Error(
+      `Invalid configuration detected at startup:\n${errorMessages}\n\n` +
+        `Please fix the configuration and restart the gateway.`,
+    );
+  }
 }

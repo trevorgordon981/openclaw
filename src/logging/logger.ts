@@ -5,6 +5,7 @@ import { Logger as TsLogger } from "tslog";
 import type { OpenClawConfig } from "../config/types.js";
 import type { ConsoleStyle } from "./console.js";
 import { readLoggingConfig } from "./config.js";
+import { attachCorrelationIdToLog } from "./correlation-context.js";
 import { type LogLevel, levelToMinLevel, normalizeLogLevel } from "./levels.js";
 import { loggingState } from "./state.js";
 
@@ -102,7 +103,8 @@ function buildLogger(settings: ResolvedSettings): TsLogger<LogObj> {
   logger.attachTransport((logObj: LogObj) => {
     try {
       const time = logObj.date?.toISOString?.() ?? new Date().toISOString();
-      const line = JSON.stringify({ ...logObj, time });
+      const logWithCorrelation = attachCorrelationIdToLog(logObj as Record<string, unknown>);
+      const line = JSON.stringify({ ...logWithCorrelation, time });
       fs.appendFileSync(settings.file, `${line}\n`, { encoding: "utf8" });
     } catch {
       // never block on logging failures

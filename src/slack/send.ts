@@ -8,6 +8,11 @@ import {
 import { loadConfig } from "../config/config.js";
 import { resolveMarkdownTableMode } from "../config/markdown-tables.js";
 import { logVerbose } from "../globals.js";
+import {
+  calculateDelayWithJitter,
+  RATE_LIMIT_RETRY_CONFIG,
+  SERVER_ERROR_RETRY_CONFIG,
+} from "../infra/retry-jitter.js";
 import { loadWebMedia } from "../web/media.js";
 import { resolveSlackAccount } from "./accounts.js";
 import { createSlackWebClient } from "./client.js";
@@ -124,12 +129,7 @@ async function uploadSlackFile(params: {
   return fileId;
 }
 
-const SLACK_RATE_LIMIT_BACKOFF_MS = 60_000;
-const SLACK_SERVER_ERROR_BACKOFF_MS = 5_000;
-
-async function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+// Removed old backoff constants - now using retry-jitter module with exponential backoff and jitter
 
 export async function sendMessageSlack(
   to: string,
@@ -224,27 +224,27 @@ export async function sendMessageSlackWithRetry(
   } catch (err) {
     const slackErr = err as { code?: string; message?: string };
 
-    // Rate limited: wait longer and retry
+    // Rate limited: use rate-limit backoff config with jitter
     if (
       slackErr.code === "rate_limited" ||
       slackErr.message?.includes("429") ||
       slackErr.message?.includes("Too Many Requests")
     ) {
-      if (retryContext.attempt < 3) {
-        const delay = SLACK_RATE_LIMIT_BACKOFF_MS * Math.pow(2, retryContext.attempt);
-        logVerbose(`Slack rate limit hit, backing off ${delay}ms`);
-        await sleep(delay);
+      if (retryContext.attempt < (RATE_LIMIT_RETRY_CONFIG.maxAttempts ?? 3) - 1) {
+        const delay = calculateDelayWithJitter(retryContext.attempt, RATE_LIMIT_RETRY_CONFIG);
+        logVerbose(`Slack rate limit hit, backing off ${delay}ms with jitter`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
         return sendMessageSlackWithRetry(to, message, opts, { attempt: retryContext.attempt + 1 });
       }
       throw new Error(`Slack rate limit exceeded after ${retryContext.attempt} retries`);
     }
 
-    // Server error: exponential backoff
+    // Server error: use server-error backoff config with jitter
     if (slackErr.code?.startsWith("5") || slackErr.message?.includes("500")) {
-      if (retryContext.attempt < 2) {
-        const delay = SLACK_SERVER_ERROR_BACKOFF_MS * Math.pow(2, retryContext.attempt);
-        logVerbose(`Slack server error, backing off ${delay}ms`);
-        await sleep(delay);
+      if (retryContext.attempt < (SERVER_ERROR_RETRY_CONFIG.maxAttempts ?? 3) - 1) {
+        const delay = calculateDelayWithJitter(retryContext.attempt, SERVER_ERROR_RETRY_CONFIG);
+        logVerbose(`Slack server error, backing off ${delay}ms with jitter`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
         return sendMessageSlackWithRetry(to, message, opts, { attempt: retryContext.attempt + 1 });
       }
       throw new Error(`Slack server error after ${retryContext.attempt} retries`);
