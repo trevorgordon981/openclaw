@@ -1,0 +1,53 @@
+# Prometheus Configuration for OpenClaw Optimization Monitoring
+
+global:
+  scrape_interval: 15s        # Default scrape interval
+  evaluation_interval: 15s    # How often to evaluate rules
+  external_labels:
+    monitor: "openclaw-prod"
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
+# Load rules once and periodically evaluate them
+rule_files:
+  - "prometheus/alerts.yml"
+
+scrape_configs:
+  # OpenClaw Metrics (from prometheus-exporter)
+  - job_name: "openclaw-metrics"
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    metrics_path: "/metrics"
+    static_configs:
+      # IMPORTANT: Update this to your OpenClaw metrics server host/port
+      # Local: localhost:9090
+      # Docker: host.docker.internal:9090
+      # Remote: your.prometheus.host:9090
+      - targets: ["host.docker.internal:9090"]
+        labels:
+          service: "openclaw"
+          environment: "production"
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+
+  # Prometheus self-monitoring
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+        labels:
+          service: "prometheus"
+          environment: "production"
+
+  # Alertmanager self-monitoring
+  - job_name: "alertmanager"
+    static_configs:
+      - targets: ["alertmanager:9093"]
+        labels:
+          service: "alertmanager"
+          environment: "production"

@@ -1,0 +1,127 @@
+# AlertManager Configuration for OpenClaw Optimization Monitoring
+
+global:
+  resolve_timeout: 5m
+  slack_api_url: "${SLACK_WEBHOOK_URL}"
+
+# The root route with all parameters, which are inherited by the child
+# routes if they are not overwritten.
+route:
+  receiver: "default"
+  group_by: ["alertname", "component", "severity"]
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 12h
+
+  # Child routes based on severity
+  routes:
+    # Critical alerts - immediate notification
+    - match:
+        severity: critical
+      receiver: "critical-alerts"
+      group_wait: 0s
+      group_interval: 5m
+      repeat_interval: 1h
+      continue: true
+
+    # Warning alerts - batched notification
+    - match:
+        severity: warning
+      receiver: "warning-alerts"
+      group_wait: 30s
+      group_interval: 15m
+      repeat_interval: 4h
+      continue: true
+
+    # Info alerts - daily digest
+    - match:
+        severity: info
+      receiver: "info-alerts"
+      group_wait: 5m
+      group_interval: 1h
+      repeat_interval: 24h
+
+# Receivers
+receivers:
+  # Default receiver (fallback)
+  - name: "default"
+    slack_configs:
+      - channel: "#openclaw-alerts"
+        title: "{{ .GroupLabels.alertname }}"
+        text: |
+          Severity: {{ .GroupLabels.severity }}
+          Component: {{ .GroupLabels.component }}
+          
+          {{ range .Alerts }}
+          *Alert:* {{ .Labels.alertname }}
+          *Description:* {{ .Annotations.description }}
+          {{ end }}
+
+  # Critical alerts (e.g., AWS/Slack down)
+  - name: "critical-alerts"
+    slack_configs:
+      - channel: "#openclaw-critical"
+        title: "🚨 CRITICAL: {{ .GroupLabels.alertname }}"
+        text: |
+          {{ range .Alerts }}
+          *{{ .Labels.alertname }}*
+          Severity: *{{ .Labels.severity }}*
+          Component: {{ .Labels.component }}
+          
+          {{ .Annotations.description }}
+          {{ if .Annotations.runbook }}Runbook: {{ .Annotations.runbook }}{{ end }}
+          
+          Started: {{ .StartsAt.Format "2006-01-02 15:04:05 MST" }}
+          {{ end }}
+        send_resolved: true
+
+  # Warning alerts (e.g., low cache hit rate)
+  - name: "warning-alerts"
+    slack_configs:
+      - channel: "#openclaw-warnings"
+        title: "⚠️ WARNING: {{ .GroupLabels.alertname }}"
+        text: |
+          Component: {{ .GroupLabels.component }}
+          
+          {{ range .Alerts }}
+          *{{ .Labels.alertname }}*
+          {{ .Annotations.description }}
+          
+          Dashboard: {{ .Annotations.dashboard }}
+          {{ end }}
+        send_resolved: false
+
+  # Info alerts (e.g., optimization metrics)
+  - name: "info-alerts"
+    slack_configs:
+      - channel: "#openclaw-info"
+        title: "ℹ️ INFO: {{ .GroupLabels.alertname }}"
+        text: |
+          {{ range .Alerts }}
+          *{{ .Labels.alertname }}*
+          {{ .Annotations.description }}
+          {{ end }}
+        send_resolved: false
+
+# Inhibition rules
+inhibit_rules:
+  # Inhibit warning alerts if critical alert is firing
+  - source_match:
+      severity: "critical"
+    target_match:
+      severity: "warning"
+    equal: ["alertname", "component"]
+
+  # Inhibit info alerts if warning or critical is firing
+  - source_match:
+      severity: "warning"
+    target_match:
+      severity: "info"
+    equal: ["alertname", "component"]
+
+  # Don't send resolved notifications for info-level alerts
+  - source_match:
+      severity: "info"
+    target_match_re:
+      alertname: ".*"
+    equal: ["component"]

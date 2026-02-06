@@ -1,0 +1,184 @@
+# Prometheus Alert Rules for OpenClaw Optimization Monitoring
+
+groups:
+  - name: openclaw_optimization
+    interval: 30s
+    rules:
+      # ============================================
+      # TOKEN SAVINGS ALERTS
+      # ============================================
+
+      - alert: LowTokenSavingsRate
+        expr: openclaw_token_savings_rate < 5
+        for: 1h
+        labels:
+          severity: warning
+          component: token-optimization
+        annotations:
+          summary: "Token savings rate below target"
+          description: "Current token savings rate: {{ $value }}%. Target: 8-11% (Phase 1-3)."
+          dashboard: "http://grafana:3000/d/openclaw-optimization/openclaw-token-performance-optimization"
+
+      # ============================================
+      # CACHE PERFORMANCE ALERTS
+      # ============================================
+
+      - alert: LowToolCacheHitRate
+        expr: |
+          (rate(openclaw_tool_cache_hits_total[5m]) / 
+           (rate(openclaw_tool_cache_hits_total[5m]) + rate(openclaw_tool_cache_misses_total[5m]))) < 0.30
+        for: 30m
+        labels:
+          severity: warning
+          component: tool-cache
+        annotations:
+          summary: "Tool cache hit rate below threshold"
+          description: "Current tool cache hit rate: {{ $value | humanizePercentage }}. Target: 60%+."
+
+      - alert: LowHTTPCacheHitRate
+        expr: |
+          (rate(openclaw_http_cache_hits_total[5m]) / 
+           (rate(openclaw_http_cache_hits_total[5m]) + rate(openclaw_http_cache_misses_total[5m]))) < 0.50
+        for: 30m
+        labels:
+          severity: warning
+          component: http-cache
+        annotations:
+          summary: "HTTP cache hit rate below threshold"
+          description: "Current HTTP cache hit rate: {{ $value | humanizePercentage }}. Target: 70%+."
+
+      # ============================================
+      # PERFORMANCE LATENCY ALERTS
+      # ============================================
+
+      - alert: HighToolInvocationLatency
+        expr: histogram_quantile(0.99, openclaw_tool_invocation_duration_seconds) > 5
+        for: 10m
+        labels:
+          severity: warning
+          component: tool-performance
+        annotations:
+          summary: "Tool invocation latency is high"
+          description: "p99 tool invocation latency: {{ $value }}s. Should be <2s with caching."
+
+      - alert: HighMemorySearchLatency
+        expr: histogram_quantile(0.95, openclaw_memory_search_duration_seconds) > 1
+        for: 10m
+        labels:
+          severity: warning
+          component: semantic-memory
+        annotations:
+          summary: "Memory search latency is high"
+          description: "p95 memory search latency: {{ $value }}s. Should be <500ms with indexing."
+
+      # ============================================
+      # INTEGRATION HEALTH ALERTS
+      # ============================================
+
+      - alert: AWSIntegrationDown
+        expr: openclaw_aws_integration_status == 0
+        for: 5m
+        labels:
+          severity: critical
+          component: aws-integration
+        annotations:
+          summary: "AWS integration is down"
+          description: "OpenClaw cannot reach AWS services. Check credentials and network connectivity."
+          runbook: "https://github.com/openclaw/openclaw/wiki/AWS-Integration-Troubleshooting"
+
+      - alert: SlackIntegrationDown
+        expr: openclaw_slack_integration_status == 0
+        for: 5m
+        labels:
+          severity: critical
+          component: slack-integration
+        annotations:
+          summary: "Slack integration is down"
+          description: "OpenClaw cannot reach Slack. Check bot token and workspace permissions."
+          runbook: "https://github.com/openclaw/openclaw/wiki/Slack-Integration-Troubleshooting"
+
+      # ============================================
+      # COST TRACKING ALERTS
+      # ============================================
+
+      - alert: CostPerSessionTrendingUp
+        expr: |
+          rate(openclaw_cost_per_session[1h]) > 0.001
+        for: 2h
+        labels:
+          severity: warning
+          component: cost-tracking
+        annotations:
+          summary: "Cost per session is trending upward"
+          description: "Cost per session increasing at {{ $value }}/hour. Investigate optimization metrics."
+
+      - alert: LowCostSavings
+        expr: increase(openclaw_cost_savings_total[24h]) < 100
+        for: 1h
+        labels:
+          severity: info
+          component: cost-tracking
+        annotations:
+          summary: "Cost savings are below expected"
+          description: "24h cost savings: ${{ $value }}. Expected: $400-600 for 1000+ sessions."
+
+      # ============================================
+      # MESSAGE COMPRESSION ALERTS
+      # ============================================
+
+      - alert: LowMessageCompressionRatio
+        expr: openclaw_message_compression_ratio < 0.6
+        for: 1h
+        labels:
+          severity: info
+          component: message-compression
+        annotations:
+          summary: "Message compression ratio below target"
+          description: "Current compression ratio: {{ $value | humanizePercentage }}. Target: 65-75%."
+
+      # ============================================
+      # INFRASTRUCTURE HEALTH ALERTS
+      # ============================================
+
+      - alert: PrometheusDown
+        expr: up{job="prometheus"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          component: infrastructure
+        annotations:
+          summary: "Prometheus is down"
+          description: "Prometheus monitoring service is unavailable."
+
+      - alert: GrafanaDown
+        expr: up{job="grafana"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          component: infrastructure
+        annotations:
+          summary: "Grafana is down"
+          description: "Grafana dashboard service is unavailable. Check container status."
+
+      # ============================================
+      # COMPOSITE HEALTH ALERTS
+      # ============================================
+
+      - alert: OptimizationSystemDegraded
+        expr: |
+          (openclaw_aws_integration_status == 0) OR
+          (openclaw_slack_integration_status == 0) OR
+          ((rate(openclaw_tool_cache_hits_total[5m]) / 
+            (rate(openclaw_tool_cache_hits_total[5m]) + rate(openclaw_tool_cache_misses_total[5m]))) < 0.20)
+        for: 10m
+        labels:
+          severity: warning
+          component: system-health
+        annotations:
+          summary: "OpenClaw optimization system is degraded"
+          description: |
+            One or more critical components are underperforming:
+            - AWS Integration: {{ $value | humanize }}
+            - Slack Integration: {{ $value | humanize }}
+            - Cache Performance: {{ $value | humanizePercentage }}
+          dashboard: "http://grafana:3000/d/openclaw-optimization/openclaw-token-performance-optimization"

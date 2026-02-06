@@ -1,0 +1,267 @@
+{
+  "dashboard": {
+    "title": "OpenClaw Token & Performance Optimization",
+    "description": "Real-time tracking of token savings (Phase 1-3), cache performance, compression ratios, and cost metrics",
+    "timezone": "UTC",
+    "tags": ["openclaw", "optimization", "performance", "cost"],
+    "panels": [
+      {
+        "id": 1,
+        "title": "Token Savings (Phase 1-3)",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "openclaw_token_savings_total",
+            "legendFormat": "Total Tokens Saved"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "custom": {
+              "hideFrom": {
+                "tooltip": false,
+                "viz": false,
+                "legend": false
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": 2,
+        "title": "Token Savings Rate (%)",
+        "type": "gauge",
+        "targets": [
+          {
+            "expr": "openclaw_token_savings_rate",
+            "legendFormat": "Savings Rate"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 15,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "yellow", "value": 5},
+                {"color": "green", "value": 8}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "Tool Result Cache Hit Rate",
+        "type": "gauge",
+        "targets": [
+          {
+            "expr": "rate(openclaw_tool_cache_hits_total[5m]) / (rate(openclaw_tool_cache_hits_total[5m]) + rate(openclaw_tool_cache_misses_total[5m]))",
+            "legendFormat": "Hit Rate"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "yellow", "value": 30},
+                {"color": "green", "value": 60}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 4,
+        "title": "HTTP Response Cache Hit Rate",
+        "type": "gauge",
+        "targets": [
+          {
+            "expr": "rate(openclaw_http_cache_hits_total[5m]) / (rate(openclaw_http_cache_hits_total[5m]) + rate(openclaw_http_cache_misses_total[5m]))",
+            "legendFormat": "Hit Rate"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "yellow", "value": 30},
+                {"color": "green", "value": 70}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 5,
+        "title": "Message Compression Ratio",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "openclaw_message_compression_ratio",
+            "legendFormat": "Compression Ratio"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percentunit",
+            "custom": {
+              "hideFrom": {
+                "tooltip": false,
+                "viz": false,
+                "legend": false
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": 6,
+        "title": "Cost Savings (Daily)",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "increase(openclaw_cost_savings_total[1d])",
+            "legendFormat": "Daily Savings"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "currencyUSD"
+          }
+        }
+      },
+      {
+        "id": 7,
+        "title": "Tool Invocation Latency (p99)",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.99, openclaw_tool_invocation_duration_seconds)",
+            "legendFormat": "p99 latency"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s"
+          }
+        }
+      },
+      {
+        "id": 8,
+        "title": "AWS Integration Health",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "openclaw_aws_integration_status",
+            "legendFormat": "AWS Status"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {
+                "type": "value",
+                "options": {
+                  "1": {"text": "Healthy", "color": "green"},
+                  "0": {"text": "Unhealthy", "color": "red"}
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": 9,
+        "title": "Slack Integration Health",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "openclaw_slack_integration_status",
+            "legendFormat": "Slack Status"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {
+                "type": "value",
+                "options": {
+                  "1": {"text": "Healthy", "color": "green"},
+                  "0": {"text": "Unhealthy", "color": "red"}
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": 10,
+        "title": "Tokens Saved by Phase",
+        "type": "piechart",
+        "targets": [
+          {
+            "expr": "openclaw_token_savings_by_phase",
+            "legendFormat": "{{phase}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short"
+          }
+        }
+      },
+      {
+        "id": 11,
+        "title": "Memory Search Performance",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, openclaw_memory_search_duration_seconds)",
+            "legendFormat": "p95 latency"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "ms"
+          }
+        }
+      },
+      {
+        "id": 12,
+        "title": "Cost per Session (Trend)",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "openclaw_cost_per_session",
+            "legendFormat": "Cost/Session"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "currencyUSD"
+          }
+        }
+      }
+    ],
+    "refresh": "30s",
+    "time": {
+      "from": "now-24h",
+      "to": "now"
+    }
+  }
+}
