@@ -284,7 +284,7 @@ export async function getReplyFromConfig(
   const routingDecision = await routeModel({
     cfg,
     inputText: cleanedBody,
-    messageHistoryDepth: sessionEntry?.messageCount ?? 0,
+    messageHistoryDepth: sessionEntry?.compactionCount ?? 0, // Use compaction count as proxy for history depth
     hasToolCalls: false, // Tool calls detected dynamically during execution
     systemPromptLength: agentCfg?.systemPrompt?.length ?? 0,
     hasSessionModelOverride: Boolean(sessionEntry?.modelOverride),

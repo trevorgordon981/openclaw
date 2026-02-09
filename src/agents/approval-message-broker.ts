@@ -55,12 +55,12 @@ export function registerApprovalBroker(router: Router): void {
       // This would normally be handled by OpenClaw's message routing
       // For now, we emit an event that the main process can handle
       if (typeof process?.send === "function") {
-        process.send({
+        (process.send as any)({
           type: "post-message",
           channel,
           message,
           meta: { sessionKey, userId, approvalRequest: true },
-        } as NodeJS.SendHandle);
+        });
       }
 
       res.json({ success: true, sessionKey });
@@ -96,12 +96,12 @@ export function registerApprovalBroker(router: Router): void {
 
       // Notify the session that a decision was made
       if (typeof process?.send === "function") {
-        process.send({
+        (process.send as any)({
           type: "approval-response",
           sessionKey,
           decision,
           reaction,
-        } as NodeJS.SendHandle);
+        });
       }
 
       // Clean up
@@ -126,10 +126,7 @@ export function registerApprovalBroker(router: Router): void {
       return res.status(404).json({ error: "Approval not found" });
     }
 
-    res.json({
-      sessionKey,
-      ...approval,
-    });
+    res.json(approval);
   });
 }
 
@@ -161,19 +158,19 @@ export async function postApprovalViaMessageSystem(params: {
         }
 
         if (typeof process?.send === "function") {
-          process.send({
+          (process.send as any)({
             type: "post-approval",
             channel: params.channel,
             message: params.message,
             sessionKey: params.sessionKey,
             userId: params.userId,
-          } as NodeJS.SendHandle);
+          });
         }
 
         // Timeout after 5s
         setTimeout(() => {
           if (typeof process?.removeListener === "function") {
-            process.removeListener("message", handler as NodeJS.MessageListener);
+            (process.removeListener as any)("message", handler);
           }
           resolve({});
         }, 5000);
