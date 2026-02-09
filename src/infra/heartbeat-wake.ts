@@ -14,6 +14,15 @@ let timer: NodeJS.Timeout | null = null;
 const DEFAULT_COALESCE_MS = 250;
 const DEFAULT_RETRY_MS = 1_000;
 
+/**
+ * Returns true if a reason is high-priority (cron or exec events).
+ * These should not be overwritten by lower-priority reasons (e.g., "interval").
+ */
+function isPriorityReason(reason: string | null): boolean {
+  if (!reason) return false;
+  return reason.startsWith("cron:") || reason === "exec-event";
+}
+
 function schedule(coalesceMs: number) {
   if (timer) {
     return;
@@ -63,7 +72,16 @@ export function setHeartbeatWakeHandler(next: HeartbeatWakeHandler | null) {
 }
 
 export function requestHeartbeatNow(opts?: { reason?: string; coalesceMs?: number }) {
-  pendingReason = opts?.reason ?? pendingReason ?? "requested";
+  const incoming = opts?.reason ?? "requested";
+  
+  // Don't overwrite a high-priority reason (cron/exec-event) with a lower-priority one.
+  // This prevents interval heartbeats from canceling pending cron jobs during the coalesce window.
+  if (isPriorityReason(pendingReason) && !isPriorityReason(incoming)) {
+    // Keep existing high-priority reason, just reschedule
+  } else {
+    pendingReason = incoming;
+  }
+  
   schedule(opts?.coalesceMs ?? DEFAULT_COALESCE_MS);
 }
 
