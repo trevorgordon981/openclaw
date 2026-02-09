@@ -76,7 +76,9 @@ export function createGatewayReloadHandlers(params: {
 
     if (plan.restartBrowserControl) {
       if (state.browserControl) {
-        await state.browserControl.stop().catch(() => {});
+        await state.browserControl.stop().catch(() => {
+          /* best-effort during reload */
+        });
       }
       try {
         nextState.browserControl = await startBrowserControlServerIfEnabled();

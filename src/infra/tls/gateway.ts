@@ -57,8 +57,12 @@ async function generateSelfSignedCert(params: {
     "-subj",
     "/CN=openclaw-gateway",
   ]);
-  await fs.chmod(params.keyPath, 0o600).catch(() => {});
-  await fs.chmod(params.certPath, 0o600).catch(() => {});
+  await fs.chmod(params.keyPath, 0o600).catch(() => {
+    /* best-effort cleanup */
+  });
+  await fs.chmod(params.certPath, 0o600).catch(() => {
+    /* best-effort cleanup */
+  });
   params.log?.info?.(
     `gateway tls: generated self-signed cert at ${shortenHomeInString(params.certPath)}`,
   );

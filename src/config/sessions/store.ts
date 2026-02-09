@@ -27,6 +27,8 @@ type SessionStoreCacheEntry = {
 
 const SESSION_STORE_CACHE = new Map<string, SessionStoreCacheEntry>();
 const DEFAULT_SESSION_STORE_TTL_MS = 45_000; // 45 seconds (between 30-60s)
+/** Maximum number of cached session store files to prevent unbounded memory growth. */
+const MAX_SESSION_STORE_CACHE_ENTRIES = 500;
 
 function isSessionStoreRecord(value: unknown): value is Record<string, SessionEntry> {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -163,6 +165,16 @@ export function loadSessionStore(
 
   // Cache the result if caching is enabled
   if (!opts.skipCache && isSessionStoreCacheEnabled()) {
+    // Evict oldest entry if cache is at capacity (simple LRU via Map insertion order)
+    if (
+      !SESSION_STORE_CACHE.has(storePath) &&
+      SESSION_STORE_CACHE.size >= MAX_SESSION_STORE_CACHE_ENTRIES
+    ) {
+      const oldestKey = SESSION_STORE_CACHE.keys().next().value;
+      if (oldestKey !== undefined) {
+        SESSION_STORE_CACHE.delete(oldestKey);
+      }
+    }
     SESSION_STORE_CACHE.set(storePath, {
       store: structuredClone(store), // Store a copy to prevent external mutations
       loadedAt: Date.now(),

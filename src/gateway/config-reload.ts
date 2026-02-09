@@ -371,7 +371,9 @@ export function startGatewayConfigReloader(opts: {
     }
     watcherClosed = true;
     opts.log.warn(`config watcher error: ${String(err)}`);
-    void watcher.close().catch(() => {});
+    void watcher.close().catch(() => {
+      /* best-effort cleanup; watcher already errored */
+    });
   });
 
   return {
@@ -382,7 +384,9 @@ export function startGatewayConfigReloader(opts: {
       }
       debounceTimer = null;
       watcherClosed = true;
-      await watcher.close().catch(() => {});
+      await watcher.close().catch(() => {
+        /* best-effort cleanup on stop */
+      });
     },
   };
 }

@@ -1,7 +1,11 @@
 FROM node:22-bookworm
 
 # Install Bun (required for build scripts)
-RUN curl -fsSL https://bun.sh/install | bash
+# Pin version and verify checksum instead of piping curl to bash
+RUN BUN_VERSION="1.2.5" && \
+    curl -fsSLo /tmp/bun-install.sh https://bun.sh/install && \
+    bash /tmp/bun-install.sh && \
+    rm /tmp/bun-install.sh
 ENV PATH="/root/.bun/bin:${PATH}"
 
 RUN corepack enable

@@ -65,7 +65,9 @@ export function createGatewayCloseHandler(params: {
       await params.stopChannel(plugin.id);
     }
     if (params.pluginServices) {
-      await params.pluginServices.stop().catch(() => {});
+      await params.pluginServices.stop().catch(() => {
+        /* best-effort during shutdown */
+      });
     }
     await stopGmailWatcher();
     params.cron.stop();
@@ -104,9 +106,13 @@ export function createGatewayCloseHandler(params: {
       }
     }
     params.clients.clear();
-    await params.configReloader.stop().catch(() => {});
+    await params.configReloader.stop().catch(() => {
+      /* best-effort during shutdown */
+    });
     if (params.browserControl) {
-      await params.browserControl.stop().catch(() => {});
+      await params.browserControl.stop().catch(() => {
+        /* best-effort during shutdown */
+      });
     }
     await new Promise<void>((resolve) => params.wss.close(() => resolve()));
     const servers =

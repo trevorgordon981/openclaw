@@ -226,6 +226,13 @@ export async function evaluateViaPlaywright(opts: {
   if (!fnText) {
     throw new Error("function is required");
   }
+  // Security: basic validation to reject obviously malicious payloads.
+  // The fnText runs in the browser sandbox (Playwright page context), not in Node,
+  // so the blast radius is limited. We still reject excessively large inputs.
+  const MAX_FN_LENGTH = 100_000;
+  if (fnText.length > MAX_FN_LENGTH) {
+    throw new Error(`function text exceeds maximum length of ${MAX_FN_LENGTH} characters`);
+  }
   const page = await getPageForTargetId(opts);
   ensurePageState(page);
   restoreRoleRefsForTarget({ cdpUrl: opts.cdpUrl, targetId: opts.targetId, page });

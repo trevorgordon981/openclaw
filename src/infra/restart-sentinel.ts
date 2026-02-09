@@ -83,11 +83,15 @@ export async function readRestartSentinel(
     try {
       parsed = JSON.parse(raw) as RestartSentinel | undefined;
     } catch {
-      await fs.unlink(filePath).catch(() => {});
+      await fs.unlink(filePath).catch(() => {
+        /* best-effort cleanup */
+      });
       return null;
     }
     if (!parsed || parsed.version !== 1 || !parsed.payload) {
-      await fs.unlink(filePath).catch(() => {});
+      await fs.unlink(filePath).catch(() => {
+        /* best-effort cleanup */
+      });
       return null;
     }
     return parsed;
@@ -104,7 +108,9 @@ export async function consumeRestartSentinel(
   if (!parsed) {
     return null;
   }
-  await fs.unlink(filePath).catch(() => {});
+  await fs.unlink(filePath).catch(() => {
+    /* best-effort cleanup */
+  });
   return parsed;
 }
 

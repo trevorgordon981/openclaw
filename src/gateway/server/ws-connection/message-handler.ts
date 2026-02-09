@@ -56,6 +56,18 @@ import {
 
 type SubsystemLogger = ReturnType<typeof createSubsystemLogger>;
 
+/**
+ * Maximum allowed clock skew for device signature timestamps (10 minutes).
+ *
+ * This window accommodates:
+ * - Mobile devices with slightly drifted clocks (common on iOS/Android after sleep)
+ * - Network latency for messages in transit
+ * - Devices in regions with unreliable NTP synchronization
+ *
+ * 10 minutes is a standard compromise: tight enough to prevent replay attacks
+ * beyond a short window, loose enough to avoid false rejections from clock drift.
+ * Signatures also include a nonce to prevent exact replay within the window.
+ */
 const DEVICE_SIGNATURE_SKEW_MS = 10 * 60 * 1000;
 
 function resolveHostName(hostHeader?: string): string {
