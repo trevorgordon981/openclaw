@@ -513,7 +513,12 @@ export async function runHeartbeatOnce(opts: {
   }
 
   const queueSize = (opts.deps?.getQueueSize ?? getQueueSize)(CommandLane.Main);
-  if (queueSize > 0) {
+  
+  // Cron and exec events should bypass the queue check since they have enqueued system events
+  // to process. The main queue serialization still applies to the LLM turn itself.
+  const isCronOrExecEvent =
+    opts.reason === "exec-event" || Boolean(opts.reason?.startsWith("cron:"));
+  if (queueSize > 0 && !isCronOrExecEvent) {
     return { status: "skipped", reason: "requests-in-flight" };
   }
 
