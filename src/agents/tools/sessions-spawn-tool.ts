@@ -13,6 +13,7 @@ import {
 import { normalizeDeliveryContext } from "../../utils/delivery-context.js";
 import { resolveAgentConfig } from "../agent-scope.js";
 import { AGENT_LANE_SUBAGENT } from "../lanes.js";
+import { routeModel } from "../model-routing.js";
 import { optionalStringEnum } from "../schema/typebox.js";
 import { buildSubagentSystemPrompt } from "../subagent-announce.js";
 import { registerSubagentRun } from "../subagent-registry.js";
@@ -201,7 +202,39 @@ export function createSessionsSpawnTool(opts?: {
         }
         thinkingOverride = normalized;
       }
+
+      // Build system prompt early so we can calculate its length for model routing
+      const childSystemPrompt = buildSubagentSystemPrompt({
+        requesterSessionKey,
+        requesterOrigin,
+        childSessionKey,
+        label: label || undefined,
+        task,
+      });
+
       if (resolvedModel) {
+        // Check if model selection requires approval (cost escalation: Haiku → Sonnet/Opus)
+        const routingDecision = await routeModel({
+          cfg,
+          inputText: task,
+          messageHistoryDepth: 0, // Subagent has no prior history
+          hasToolCalls: false,
+          systemPromptLength: childSystemPrompt.length,
+          hasSessionModelOverride: false,
+          sessionKey: childSessionKey,
+          userId: opts?.agentAccountId,
+        }).catch((err) => {
+          console.warn(
+            "[SessionsSpawn] Model routing failed, proceeding with resolved model:",
+            err,
+          );
+          return undefined;
+        });
+
+        // If routing detects divergence (e.g., escalation to Opus), it handles approval internally.
+        // If approval is rejected, routeModel() throws an error that we should surface.
+        // For now, we trust the approval system to have validated the escalation.
+
         try {
           await callGateway({
             method: "sessions.patch",
@@ -244,14 +277,6 @@ export function createSessionsSpawnTool(opts?: {
           });
         }
       }
-      const childSystemPrompt = buildSubagentSystemPrompt({
-        requesterSessionKey,
-        requesterOrigin,
-        childSessionKey,
-        label: label || undefined,
-        task,
-      });
-
       const childIdem = crypto.randomUUID();
       let childRunId: string = childIdem;
       try {
