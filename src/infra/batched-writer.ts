@@ -39,7 +39,7 @@ function createBatchedWriter(): TranscriptWriter {
         const content = lines.join("\n") + "\n";
         try {
           await appendFileAsync(path, content);
-        } catch (err) {
+        } catch {
           // Fallback to sync write
           try {
             appendFileSync(path, content);

@@ -34,7 +34,7 @@ export interface ApprovalEvent {
 
 const AUDIT_LOG_PATH = process.env.AUDIT_LOG_PATH || "~/.openclaw/logs/model-approval-audit.jsonl";
 const APPROVAL_TIMEOUT_MS = 60_000; // 60 second timeout
-const SLACK_CHANNEL = process.env.SLACK_APPROVAL_CHANNEL || "D0ADHLY5WJE"; // DM with Trevor
+const _SLACK_CHANNEL = process.env.SLACK_APPROVAL_CHANNEL || "D0ADHLY5WJE"; // DM with Trevor
 
 /**
  * Detect model divergence: when auto-routing picks Sonnet/Opus instead of Haiku.
@@ -194,7 +194,7 @@ export async function requestApproval(params: {
   userId: string;
   routingDecision: RoutingDecision;
 }): Promise<DivergenceDecision> {
-  const { event, sessionKey, userId } = params;
+  const { event } = params;
 
   const interactivePrompt = `
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -218,7 +218,7 @@ Waiting for decision... (timeout: ${APPROVAL_TIMEOUT_MS / 1000}s)
   `.trim();
 
   // Send all three in parallel
-  const [slackPromise, pausePromise, auditPromise] = await Promise.allSettled([
+  const [_slackPromise, pausePromise, _auditPromise] = await Promise.allSettled([
     sendSlackApprovalDm({ event }),
     pauseAndPromptApproval({ event, interactivePrompt }),
     new Promise<void>((resolve) => {

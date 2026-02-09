@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import {
   detectDivergence,
   createApprovalEvent,
@@ -112,7 +112,6 @@ describe("approval-interlay", () => {
 
   describe("recordDecision", () => {
     it("records user approval decision", () => {
-      const startTime = Date.now();
       recordDecision(mockEvent, "approve", "user", 2500);
 
       expect(mockEvent.decision).toBe("approve");
