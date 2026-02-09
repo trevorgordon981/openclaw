@@ -1,6 +1,7 @@
 import chokidar from "chokidar";
 import type { OpenClawConfig, ConfigFileSnapshot, GatewayReloadMode } from "../config/config.js";
 import { type ChannelId, listChannelPlugins } from "../channels/plugins/index.js";
+import { clearConfigCache } from "../config/config.js";
 import { getActivePluginRegistry } from "../plugins/runtime.js";
 
 export type GatewayReloadSettings = {
@@ -299,6 +300,9 @@ export function startGatewayConfigReloader(opts: {
       clearTimeout(debounceTimer);
       debounceTimer = null;
     }
+    // Invalidate the config cache immediately so that any loadConfig() call
+    // during or after this reload picks up the fresh file from disk.
+    clearConfigCache();
     try {
       const snapshot = await opts.readSnapshot();
       if (!snapshot.valid) {
