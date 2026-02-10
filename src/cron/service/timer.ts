@@ -286,12 +286,28 @@ export async function onTimer(state: CronServiceState) {
       },
     );
 
-    const results: JobResult[] = settled
-      .filter(
-        (s): s is PromiseSettledResult<JobResult> & { status: "fulfilled" } =>
-          s.status === "fulfilled",
-      )
-      .map((s) => s.value);
+    // Handle both fulfilled and rejected settlements. Rejected settlements
+    // (from unexpected throws in the worker wrapper) get synthesized into
+    // error results so state cleanup and events still occur (#12998 review).
+    const results: JobResult[] = settled.map((s, idx) => {
+      if (s.status === "fulfilled") {
+        return s.value;
+      }
+      // Synthesize an error result for rejected settlements
+      const { id, job } = dueJobs[idx];
+      const now = state.deps.nowMs();
+      state.deps.log.error(
+        { jobId: id, jobName: job.name, reason: String(s.reason) },
+        "cron: job worker threw unexpectedly",
+      );
+      return {
+        jobId: id,
+        status: "error" as const,
+        error: `Worker threw: ${String(s.reason)}`,
+        startedAt: job.state.runningAtMs ?? now,
+        endedAt: now,
+      };
+    });
 
     if (results.length > 0) {
       await locked(state, async () => {
