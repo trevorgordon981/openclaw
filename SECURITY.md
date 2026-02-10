@@ -39,8 +39,8 @@ OpenClaw's web interface is intended for local use only. Do **not** bind it to t
 
 OpenClaw requires **Node.js 22.12.0 or later** (LTS). This version includes important security patches:
 
-- CVE-2025-59466: async_hooks DoS vulnerability
-- CVE-2026-21636: Permission model bypass vulnerability
+- CVE-2024-59466: async_hooks DoS vulnerability
+- CVE-2024-21636: Permission model bypass vulnerability
 
 Verify your Node.js version:
 

@@ -1050,7 +1050,7 @@ Docs: [Cron jobs](/automation/cron-jobs), [Cron vs Heartbeat](/automation/cron-v
 ### How do I install skills on Linux
 
 Use **ClawHub** (CLI) or drop skills into your workspace. The macOS Skills UI isn't available on Linux.
-Browse skills at [https://clawhub.com](https://clawhub.com).
+Browse skills at [https://clawhub.ai](https://clawhub.ai).
 
 Install the ClawHub CLI (pick one package manager):
 
