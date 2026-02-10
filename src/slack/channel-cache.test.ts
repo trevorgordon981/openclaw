@@ -52,7 +52,7 @@ describe("SlackChannelCache", () => {
       };
 
       // Second call should use cache, not call API
-      const channels = await slackChannelCache.getChannels(mockToken, freshMock as any);
+      const channels = await slackChannelCache.getChannels(mockToken, freshMock as WebClient);
       expect(channels).toHaveLength(4);
       expect(freshMock.conversations.list).not.toHaveBeenCalled();
     });
@@ -73,7 +73,7 @@ describe("SlackChannelCache", () => {
         },
       };
 
-      const channels = await slackChannelCache.getChannels(mockToken, paginatedClient as any);
+      const channels = await slackChannelCache.getChannels(mockToken, paginatedClient as WebClient);
       expect(channels).toHaveLength(4);
     });
   });
@@ -177,7 +177,7 @@ describe("SlackChannelCache", () => {
       slackChannelCache.clearCache();
       const map = await slackChannelCache.getChannelsByName(
         "xoxb-duplicate-test",
-        duplicateClient as any,
+        duplicateClient as WebClient,
       );
 
       // Should prefer C200 (non-archived) over C100 (archived)
@@ -201,7 +201,7 @@ describe("SlackChannelCache", () => {
       slackChannelCache.clearCache();
       const map = await slackChannelCache.getChannelsByName(
         "xoxb-dup-both-active",
-        duplicateClient as any,
+        duplicateClient as WebClient,
       );
 
       // Should keep first one since both are non-archived
