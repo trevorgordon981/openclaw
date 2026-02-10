@@ -1,4 +1,5 @@
 import type { WebClient } from "@slack/web-api";
+import crypto from "crypto";
 import { createSlackWebClient } from "./client.js";
 
 export type CachedSlackChannel = {
@@ -76,6 +77,7 @@ class SlackChannelCache {
 
   /**
    * Get all channels by name (convenient lookup)
+   * When duplicate names exist, prefers non-archived channels
    */
   async getChannelsByName(
     token: string,
@@ -84,7 +86,12 @@ class SlackChannelCache {
     const channels = await this.getChannels(token, client);
     const map = new Map<string, CachedSlackChannel>();
     for (const channel of channels) {
-      map.set(channel.name.toLowerCase(), channel);
+      const lowerName = channel.name.toLowerCase();
+      const existing = map.get(lowerName);
+      // Prefer non-archived channels when duplicates exist
+      if (!existing || (existing.archived && !channel.archived)) {
+        map.set(lowerName, channel);
+      }
     }
     return map;
   }
@@ -119,8 +126,8 @@ class SlackChannelCache {
   // ============ Private methods ============
 
   private getAccountKey(token: string): string {
-    // Use first 16 chars of token as key (safe identifier)
-    return token.slice(0, 16);
+    // Use hash of token to avoid collisions from tokens with same prefix
+    return crypto.createHash("sha256").update(token).digest("hex").slice(0, 32);
   }
 
   private normalizeInput(input: string): {

@@ -158,6 +158,55 @@ describe("SlackChannelCache", () => {
       expect(map.get("random")?.id).toBe("C002");
       expect(map.size).toBe(4);
     });
+
+    it("should prefer non-archived channels when duplicate names exist", async () => {
+      // Create mock with duplicate channel names (archived and non-archived)
+      const duplicateClient = {
+        conversations: {
+          list: vi.fn().mockResolvedValue({
+            channels: [
+              { id: "C100", name: "duplicate", is_archived: true, is_private: false },
+              { id: "C200", name: "duplicate", is_archived: false, is_private: false },
+              { id: "C300", name: "other", is_archived: false, is_private: false },
+            ],
+            response_metadata: { next_cursor: "" },
+          }),
+        },
+      };
+
+      slackChannelCache.clearCache();
+      const map = await slackChannelCache.getChannelsByName(
+        "xoxb-duplicate-test",
+        duplicateClient as any,
+      );
+
+      // Should prefer C200 (non-archived) over C100 (archived)
+      expect(map.get("duplicate")?.id).toBe("C200");
+      expect(map.get("duplicate")?.archived).toBe(false);
+    });
+
+    it("should keep first non-archived when both duplicates are non-archived", async () => {
+      const duplicateClient = {
+        conversations: {
+          list: vi.fn().mockResolvedValue({
+            channels: [
+              { id: "C100", name: "duplicate", is_archived: false, is_private: false },
+              { id: "C200", name: "duplicate", is_archived: false, is_private: false },
+            ],
+            response_metadata: { next_cursor: "" },
+          }),
+        },
+      };
+
+      slackChannelCache.clearCache();
+      const map = await slackChannelCache.getChannelsByName(
+        "xoxb-dup-both-active",
+        duplicateClient as any,
+      );
+
+      // Should keep first one since both are non-archived
+      expect(map.get("duplicate")?.id).toBe("C100");
+    });
   });
 
   describe("clearCache", () => {
