@@ -16,6 +16,8 @@ describe("SessionCheckpoint", () => {
   const testDir = path.join(os.tmpdir(), "openclaw-test-checkpoints");
 
   beforeEach(() => {
+    // Mock os.homedir to use test directory
+    vi.spyOn(os, 'homedir').mockReturnValue(path.dirname(testDir));
     // Create test directory
     if (!fs.existsSync(testDir)) {
       fs.mkdirSync(testDir, { recursive: true });
@@ -23,6 +25,8 @@ describe("SessionCheckpoint", () => {
   });
 
   afterEach(() => {
+    // Restore mocks
+    vi.restoreAllMocks();
     // Clean up test directory
     if (fs.existsSync(testDir)) {
       fs.rmSync(testDir, { recursive: true });

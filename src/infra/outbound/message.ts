@@ -148,8 +148,8 @@ export async function sendMessage(params: MessageSendParams): Promise<MessageSen
   let resolvedTo = params.to;
   if (channel === "slack" && params.to) {
     const input = params.to.trim();
-    // Try to resolve channel names (e.g., "general", "#general", "#alerts" -> channel ID)
-    if (input.startsWith("#") || (!input.startsWith("C") && !input.match(/^<#[CG]/))) {
+    // Try to resolve unless it's clearly a channel ID (C or G prefix followed by uppercase alphanumerics)
+    if (!/^[CG][A-Z0-9]+$/i.test(input)) {
       const resolved = await resolveSlackChannelNameToId(input, cfg, params.accountId);
       if (resolved) {
         resolvedTo = resolved;
