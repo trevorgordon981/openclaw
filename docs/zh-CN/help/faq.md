@@ -983,7 +983,7 @@ openclaw cron runs --id <jobId> --limit 50
 ### 如何在 Linux 上安装 Skills
 
 使用 **ClawHub**（CLI）或将 Skills 放入你的工作区。macOS Skills UI 在 Linux 上不可用。
-浏览 Skills：https://clawhub.com。
+浏览 Skills：https://clawhub.ai。
 
 安装 ClawHub CLI（选择一个包管理器）：
 

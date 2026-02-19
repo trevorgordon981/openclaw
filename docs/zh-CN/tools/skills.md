@@ -47,7 +47,7 @@ Skills 从**三个**位置加载：
 
 ## ClawHub（安装 + 同步）
 
-ClawHub 是 OpenClaw 的公共 Skills 注册表。浏览 https://clawhub.com。使用它来发现、安装、更新和备份 Skills。完整指南：[ClawHub](/tools/clawhub)。
+ClawHub 是 OpenClaw 的公共 Skills 注册表。浏览 https://clawhub.ai。使用它来发现、安装、更新和备份 Skills。完整指南：[ClawHub](/tools/clawhub)。
 
 常见流程：
 
@@ -274,6 +274,6 @@ OpenClaw 作为安装的一部分（npm 包或 OpenClaw.app）发布一组基线
 
 ## 寻找更多 Skills？
 
-浏览 https://clawhub.com。
+浏览 https://clawhub.ai。
 
 ---
